@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      PAYMENT_SERVICE_URL: http://payment-service:8080
+      ORDER_SERVICE_URL: http://order-service:8081
+    depends_on:
+      - payment-service
+      - order-service
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8080:8080"
+    environment:
+      FRAUD_SERVICE_URL: http://fraud-service:8082
+      NOTIFICATION_SERVICE_URL: http://notification-service:8083
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      - fraud-service
+      - notification-service
+
+  order-service:
+    build: ./order-service
+    ports:
+      - "8081:8081"
+    environment:
+      PAYMENT_SERVICE_URL: http://payment-service:8080
+      INVENTORY_SERVICE_URL: http://inventory-service:8084
+    depends_on:
+      - payment-service
+      - inventory-service
+
+  fraud-service:
+    build: ./fraud-service
+    ports:
+      - "8082:8082"
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "8083:8083"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+  inventory-service:
+    build: ./inventory-service
+    ports:
+      - "8084:8084"
