@@ -1,0 +1,51 @@
+openapi: 3.0.0
+info:
+  title: Payment Service
+  version: 2.0.0
+  description: Credit card processing service
+servers:
+  - url: http://payment:50051
+paths:
+  /Charge:
+    post:
+      summary: Charge a credit card
+      operationId: charge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, credit_card, order_id, merchant_id]
+              properties:
+                amount:
+                  type: object
+                  required: [units, currency_code]
+                  properties:
+                    units: { type: integer }
+                    nanos: { type: integer }
+                    currency_code: { type: string }
+                credit_card:
+                  type: object
+                  required: [number, cvv, expiry_month, expiry_year]
+                  properties:
+                    number: { type: string }
+                    cvv: { type: string }
+                    expiry_month: { type: integer }
+                    expiry_year: { type: integer }
+                order_id:
+                  type: string
+                merchant_id:
+                  type: string
+                  description: New required field for multi-tenant routing
+      responses:
+        '200':
+          description: Charge succeeded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transaction_id, status]
+                properties:
+                  transaction_id: { type: string }
+                  status: { type: string }

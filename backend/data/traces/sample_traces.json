@@ -1,0 +1,39 @@
+{
+  "traces": [
+    {
+      "traceID": "abc123",
+      "spans": [
+        {
+          "spanID": "span1",
+          "operationName": "PlaceOrder",
+          "process": { "serviceName": "checkout" },
+          "tags": { "peer.service": "payment", "rpc.method": "Charge" }
+        },
+        {
+          "spanID": "span2",
+          "operationName": "GetCart",
+          "process": { "serviceName": "checkout" },
+          "tags": { "peer.service": "cart", "rpc.method": "GetCart" }
+        },
+        {
+          "spanID": "span3",
+          "operationName": "SendOrderConfirmation",
+          "process": { "serviceName": "checkout" },
+          "tags": { "peer.service": "email", "http.url": "http://email:8080/SendOrderConfirmation" }
+        },
+        {
+          "spanID": "span4",
+          "operationName": "checkout",
+          "process": { "serviceName": "frontend" },
+          "tags": { "peer.service": "checkout", "rpc.method": "PlaceOrder" }
+        },
+        {
+          "spanID": "span5",
+          "operationName": "GetProduct",
+          "process": { "serviceName": "recommendation" },
+          "tags": { "peer.service": "product-catalog", "rpc.method": "GetProduct" }
+        }
+      ]
+    }
+  ]
+}
