@@ -3,6 +3,7 @@ import type {
   DependencyGraph, ServiceNode, ChangeRequest, BlastRadiusResult, RCARequest,
   SRBSubmission, SRBValidation,
   SchemaDiffRequest, SchemaDiffResult, PaymentDiffSample,
+  MultiRepoIngestResponse,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api', timeout: 60_000 })
@@ -53,4 +54,13 @@ export const ingestRepo = (
 ) =>
   api
     .post('/ingest/repo', { repo_path, strategy, reset_graph }, { timeout: 120_000 })
+    .then((r) => r.data)
+
+export const ingestMultipleRepos = (
+  repo_paths: string[],
+  strategy: 'static' | 'ai' | 'both',
+  reset_graph: boolean,
+): Promise<MultiRepoIngestResponse> =>
+  api
+    .post('/ingest/repos', { repo_paths, strategy, reset_graph }, { timeout: 240_000 })
     .then((r) => r.data)

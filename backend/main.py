@@ -16,6 +16,8 @@ from graph.models import (
     DependencyGraph, ServiceNode, ServiceEdge,
     SRBSubmission, SRBValidation,
     SchemaDiffRequest, SchemaDiffResult,
+    MultiRepoIngestRequest, MultiRepoIngestResponse,
+    RepoGroup, RepoScanResult,
 )
 from graph.srb_analyzer import validate_srb as run_srb_validation
 from graph.schema_diff import diff_specs
@@ -26,6 +28,7 @@ from ai.claude_analyzer import (
 from ingestion.swagger_parser import parse_openapi_spec
 from ingestion.repo_scanner import RepoScanner
 from ai.repo_analyzer import analyze_repo, to_graph_models
+from ingestion.multi_repo_scanner import scan_multiple_repos, group_by_parent_directory
 
 
 @asynccontextmanager
@@ -36,7 +39,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="ArchIntel API",
+    title="Lumen AI API",
     description="AI-Powered Architectural Intelligence Platform",
     version="1.0.0",
     lifespan=lifespan,
@@ -265,6 +268,72 @@ def ingest_repo(request: RepoIngestRequest):
         strategy_used=request.strategy,
         summary=ai_summary or f"Scanned {repo_path} via static analysis.",
         message=f"Loaded {len(nodes)} services and {len(edges)} edges from {Path(repo_path).name}",
+    )
+
+
+@app.post("/api/ingest/repos", response_model=MultiRepoIngestResponse)
+def ingest_multiple_repos(request: MultiRepoIngestRequest):
+    """
+    Scans multiple repositories in one operation, detects cross-repo edges,
+    and groups repos by shared parent directory.
+    """
+    if not request.repo_paths:
+        raise HTTPException(status_code=400, detail="repo_paths must not be empty")
+
+    all_nodes, all_edges, per_repo_results, cross_edges = scan_multiple_repos(
+        request.repo_paths,
+        request.strategy,
+        _merge_graph,
+    )
+
+    valid_results = [r for r in per_repo_results if r.error is None]
+    if not valid_results:
+        errors = "; ".join(r.error for r in per_repo_results if r.error)
+        raise HTTPException(status_code=400, detail=f"All repos failed to scan: {errors}")
+
+    builder = get_graph_builder()
+
+    if request.reset_graph:
+        from graph.builder import GraphBuilder
+        import graph.builder as builder_mod
+        builder_mod._builder = GraphBuilder()
+        builder = get_graph_builder()
+
+    for node in all_nodes:
+        builder.add_service_from_spec(node, [])
+    for edge in all_edges:
+        if edge.source in builder.services and edge.target in builder.services:
+            builder._edges.append(edge)
+            builder._graph.add_edge(
+                edge.source, edge.target,
+                protocol=edge.protocol,
+                label=edge.label,
+            )
+    builder._compute_risk_scores()
+
+    groups, independent_repos = group_by_parent_directory(per_repo_results, cross_edges)
+
+    collision_note = ""
+    prefixed = [
+        r for r in per_repo_results
+        if any("/" in svc.id for svc in r.services)
+    ]
+    if prefixed:
+        collision_note = f" (service ID collisions resolved for: {', '.join(r.repo_name for r in prefixed)})"
+
+    return MultiRepoIngestResponse(
+        repos_scanned=len(per_repo_results),
+        total_services_added=len(all_nodes),
+        total_edges_added=len(all_edges),
+        cross_repo_edges_added=len(cross_edges),
+        strategy_used=request.strategy,
+        groups=groups,
+        independent_repos=independent_repos,
+        per_repo=per_repo_results,
+        message=(
+            f"Scanned {len(per_repo_results)} repos: {len(all_nodes)} services, "
+            f"{len(all_edges)} edges ({len(cross_edges)} cross-repo){collision_note}"
+        ),
     )
 
 

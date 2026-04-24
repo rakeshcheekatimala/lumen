@@ -157,3 +157,39 @@ class SchemaDiffResult(BaseModel):
     total_count: int
     service_id: Optional[str] = None
     blast_radius: Optional[BlastRadiusResult] = None
+
+
+# ─── Multi-Repo Ingestion ─────────────────────────────────────────────────────
+
+class MultiRepoIngestRequest(BaseModel):
+    repo_paths: list[str]
+    strategy: str = "both"
+    reset_graph: bool = False
+
+
+class RepoScanResult(BaseModel):
+    repo_path: str
+    repo_name: str
+    services: list[ServiceNode]
+    edges: list[ServiceEdge]
+    error: Optional[str] = None
+
+
+class RepoGroup(BaseModel):
+    group_name: str
+    repo_names: list[str]
+    services_count: int
+    edges_count: int
+    cross_repo_edges_count: int
+
+
+class MultiRepoIngestResponse(BaseModel):
+    repos_scanned: int
+    total_services_added: int
+    total_edges_added: int
+    cross_repo_edges_added: int
+    strategy_used: str
+    groups: list[RepoGroup]
+    independent_repos: list[str]
+    per_repo: list[RepoScanResult]
+    message: str

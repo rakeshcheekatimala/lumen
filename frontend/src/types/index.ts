@@ -184,3 +184,39 @@ export interface PaymentDiffSample {
   new_spec: string
   service_id: string
 }
+
+// ─── Multi-Repo Ingestion ─────────────────────────────────────────────────────
+
+export interface RepoScanResult {
+  repo_path: string
+  repo_name: string
+  services: ServiceNode[]
+  edges: ServiceEdge[]
+  error: string | null
+}
+
+export interface RepoGroup {
+  group_name: string
+  repo_names: string[]
+  services_count: number
+  edges_count: number
+  cross_repo_edges_count: number
+}
+
+export interface MultiRepoIngestRequest {
+  repo_paths: string[]
+  strategy: 'static' | 'ai' | 'both'
+  reset_graph: boolean
+}
+
+export interface MultiRepoIngestResponse {
+  repos_scanned: number
+  total_services_added: number
+  total_edges_added: number
+  cross_repo_edges_added: number
+  strategy_used: string
+  groups: RepoGroup[]
+  independent_repos: string[]
+  per_repo: RepoScanResult[]
+  message: string
+}
