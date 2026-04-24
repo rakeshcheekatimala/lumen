@@ -115,13 +115,13 @@ def _mock_result(repo_name: str) -> dict:
     }
 
 
-def analyze_repo(repo_path: str) -> dict:
+def analyze_repo(repo_path: str, org_context: str = "") -> dict:
     """
     Feed key repository files to Claude and extract the microservice topology.
 
     Returns:
         {
-          "services": [{"id", "name", "language", "team", "description"}, ...],
+          "services": [{"id", "name", "language", "team", "description", "node_type"}, ...],
           "edges":    [{"source", "target", "protocol", "label"}, ...],
           "summary":  "architecture summary string"
         }
@@ -140,7 +140,9 @@ def analyze_repo(repo_path: str) -> dict:
         for f in files
     )
 
-    prompt = f"""You are an expert software architect analyzing a microservices repository.
+    org_section = f"\n{org_context}\n" if org_context else ""
+
+    prompt = f"""You are an expert software architect analyzing a microservices repository.{org_section}
 
 Analyze the source files below and extract the complete microservice topology.
 

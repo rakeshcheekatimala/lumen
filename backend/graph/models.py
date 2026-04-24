@@ -70,6 +70,7 @@ class BlastRadiusResult(BaseModel):
     total_impacted: int
     risk_level: str  # critical, high, medium, low
     ai_analysis: Optional[str] = None
+    ai_mode: str = "none"   # "real" | "mock" | "none"
     propagation_paths: list[list[str]] = []
 
 
@@ -84,6 +85,7 @@ class RCAResult(BaseModel):
     blast_radius: list[ImpactedService]
     ai_analysis: str
     recommended_actions: list[str]
+    ai_mode: str = "none"   # "real" | "mock" | "none"
 
 
 # ─── SRB Autopilot ────────────────────────────────────────────────────────────

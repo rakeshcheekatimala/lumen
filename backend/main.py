@@ -28,6 +28,7 @@ from graph.schema_diff import diff_specs
 from ai.claude_analyzer import (
     analyze_blast_radius, analyze_rca, validate_srb_design,
     analyze_srb, analyze_schema_diff,
+    format_graph_context, MOCK_AI,
 )
 from ingestion.swagger_parser import parse_openapi_spec
 from ingestion.repo_scanner import RepoScanner
@@ -98,11 +99,14 @@ def blast_radius(change: ChangeRequest):
 
 @app.post("/api/blast-radius/analyze", response_model=BlastRadiusResult)
 def blast_radius_with_ai(change: ChangeRequest):
-    """Computes blast radius AND runs Claude AI analysis."""
+    """Computes blast radius AND runs Claude AI analysis with full org graph context."""
     builder = get_graph_builder()
     try:
         result = compute_blast_radius(builder, change)
-        result.ai_analysis = analyze_blast_radius(result, change)
+        graph = builder.to_dependency_graph()
+        ctx = format_graph_context(graph.services, graph.edges)
+        result.ai_analysis = analyze_blast_radius(result, change, graph_context=ctx)
+        result.ai_mode = "mock" if MOCK_AI else "real"
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -116,7 +120,10 @@ def root_cause_analysis(request: RCARequest):
     builder = get_graph_builder()
     try:
         rca = compute_rca(builder, request)
-        rca.ai_analysis = analyze_rca(rca, request.incident_description, request.incident_service)
+        graph = builder.to_dependency_graph()
+        ctx = format_graph_context(graph.services, graph.edges)
+        rca.ai_analysis = analyze_rca(rca, request.incident_description, request.incident_service, graph_context=ctx)
+        rca.ai_mode = "mock" if MOCK_AI else "real"
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return rca
@@ -146,9 +153,12 @@ def validate_srb(request: SRBRequest):
             f"calls {', '.join(dep_names) or 'no dependencies'}"
         )
 
+    graph = builder.to_dependency_graph()
+    ctx = format_graph_context(graph.services, graph.edges)
     result = validate_srb_design(
         services_summary="\n".join(summary_lines) or "No specific services selected",
         proposed_change=request.proposed_change,
+        graph_context=ctx,
     )
     return result
 
@@ -230,7 +240,9 @@ def ingest_repo(request: RepoIngestRequest):
             static_nodes, static_edges = RepoScanner(repo_path).scan()
 
         if request.strategy in ("ai", "both"):
-            ai_result = analyze_repo(repo_path)
+            org_graph = get_graph_builder().to_dependency_graph()
+            org_ctx = format_graph_context(org_graph.services, org_graph.edges)
+            ai_result = analyze_repo(repo_path, org_context=org_ctx)
             ai_nodes, ai_edges = to_graph_models(ai_result)
             ai_summary = ai_result.get("summary", "")
 
@@ -346,7 +358,9 @@ def srb_validate(submission: SRBSubmission, include_ai: bool = True):
     builder = get_graph_builder()
     validation = run_srb_validation(submission, builder)
     if include_ai:
-        validation.ai_rationale = analyze_srb(validation)
+        graph = builder.to_dependency_graph()
+        ctx = format_graph_context(graph.services, graph.edges)
+        validation.ai_rationale = analyze_srb(validation, graph_context=ctx)
     return validation
 
 
@@ -373,13 +387,13 @@ def schema_diff(request: SchemaDiffRequest, include_ai: bool = True, include_bla
 
     # Stash AI narrative on the ai_analysis of the nested blast radius if present
     if include_ai:
-        narrative = analyze_schema_diff(result)
+        builder = get_graph_builder()
+        graph = builder.to_dependency_graph()
+        ctx = format_graph_context(graph.services, graph.edges)
+        narrative = analyze_schema_diff(result, graph_context=ctx)
         if result.blast_radius:
             result.blast_radius.ai_analysis = narrative
-        else:
-            # embed narrative via a synthetic blast_radius carrier would be odd;
-            # we return the narrative through a new field-like channel (dict override)
-            pass
+            result.blast_radius.ai_mode = "mock" if MOCK_AI else "real"
     return result
 
 
@@ -403,4 +417,6 @@ def health():
         "status": "ok",
         "services": len(builder.services),
         "edges": len(builder.edges),
+        "ai_mode": "mock" if MOCK_AI else "real",
+        "api_key_set": bool(os.environ.get("ANTHROPIC_API_KEY")),
     }

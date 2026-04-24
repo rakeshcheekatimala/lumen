@@ -2,10 +2,15 @@ import { useState, useMemo } from 'react'
 import {
   ScanSearch, FolderOpen, Loader2, CheckCircle2, AlertCircle,
   ChevronDown, ChevronUp, Zap, Brain, Layers, GripVertical, X, Link2, Package,
+  ShieldCheck, GitCompare,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { ingestMultipleRepos } from '../api/client'
-import type { MultiRepoIngestResponse, RepoGroup, RepoScanResult, ServiceNode, ServiceEdge } from '../types'
+import ReactMarkdown from 'react-markdown'
+import { ingestMultipleRepos, validateSRBLegacy, fetchPaymentDiffSample, diffSchemas } from '../api/client'
+import type {
+  MultiRepoIngestResponse, RepoGroup, RepoScanResult, ServiceNode, ServiceEdge,
+  SRBValidation, SchemaDiffResult,
+} from '../types'
 import ScanGraph from './ScanGraph'
 
 type Strategy = 'static' | 'ai' | 'both'
@@ -27,10 +32,14 @@ export default function RepoScanner() {
   const [repoDrafts, setRepoDrafts] = useState<RepoDraft[]>([])
   const [strategy, setStrategy]     = useState<Strategy>('both')
   const [isDragOver, setIsDragOver] = useState(false)
-  const [scanning, setScanning]     = useState(false)
-  const [result, setResult]         = useState<MultiRepoIngestResponse | null>(null)
-  const [error, setError]           = useState<string | null>(null)
+  const [scanning, setScanning]         = useState(false)
+  const [result, setResult]             = useState<MultiRepoIngestResponse | null>(null)
+  const [error, setError]               = useState<string | null>(null)
   const [graphExpanded, setGraphExpanded] = useState(true)
+  const [srbResult, setSrbResult]       = useState<SRBValidation | null>(null)
+  const [srbLoading, setSrbLoading]     = useState(false)
+  const [schemaDiff, setSchemaDiff]     = useState<SchemaDiffResult | null>(null)
+  const [diffLoading, setDiffLoading]   = useState(false)
 
   const composePath = (folderName: string): string => {
     const base = basePath.trim().replace(/\/$/, '')
@@ -77,6 +86,34 @@ export default function RepoScanner() {
 
   const handleRemove = (id: string) => {
     setRepoDrafts((prev) => prev.filter((d) => d.id !== id))
+  }
+
+  const handleRunSRB = async (serviceNames: string[]) => {
+    setSrbLoading(true)
+    setSrbResult(null)
+    try {
+      const proposed = `Adding new API endpoint to ${serviceNames[0] ?? 'scanned service'} with downstream dependencies`
+      const data = await validateSRBLegacy(proposed, serviceNames.slice(0, 3))
+      setSrbResult(data as SRBValidation)
+    } catch {
+      // silent — show nothing on error
+    } finally {
+      setSrbLoading(false)
+    }
+  }
+
+  const handleLoadDiff = async () => {
+    setDiffLoading(true)
+    setSchemaDiff(null)
+    try {
+      const sample = await fetchPaymentDiffSample()
+      const diff = await diffSchemas({ old_spec: sample.old_spec, new_spec: sample.new_spec, service_id: sample.service_id })
+      setSchemaDiff(diff)
+    } catch {
+      // silent
+    } finally {
+      setDiffLoading(false)
+    }
   }
 
   const handleScanAll = async () => {
@@ -415,6 +452,143 @@ export default function RepoScanner() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Post-scan: SRB + Schema Diff exploration */}
+      {result && result.total_services_added > 0 && (
+        <div className="space-y-3">
+          {/* SRB Quick Review */}
+          <div className="bg-[#0d1526] border border-[#1e2d45] rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-[#1e2d45] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={13} className="text-violet-400" />
+                <span className="text-xs font-medium text-slate-300">SRB Validation</span>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25">● MOCK</span>
+              </div>
+              <button
+                onClick={() => handleRunSRB(allServices.slice(0, 3).map(s => s.id))}
+                disabled={srbLoading}
+                className="text-xs text-violet-400 hover:text-violet-300 disabled:text-slate-600 transition-colors flex items-center gap-1"
+              >
+                {srbLoading ? <Loader2 size={11} className="animate-spin" /> : null}
+                {srbLoading ? 'Running…' : 'Run Review'}
+              </button>
+            </div>
+            <div className="p-4">
+              {!srbResult && !srbLoading && (
+                <p className="text-[11px] text-slate-600">
+                  Click "Run Review" to validate the scanned services against org architecture rules.
+                </p>
+              )}
+              {srbLoading && (
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Loader2 size={12} className="animate-spin" />
+                  Claude is reviewing the architecture…
+                </div>
+              )}
+              {srbResult && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className={clsx(
+                      'text-xs font-semibold px-2 py-1 rounded',
+                      srbResult.recommendation === 'APPROVE' ? 'bg-green-500/20 text-green-300'
+                      : srbResult.recommendation === 'REJECT' ? 'bg-red-500/20 text-red-300'
+                      : 'bg-amber-500/20 text-amber-300',
+                    )}>
+                      {srbResult.recommendation}
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      Risk: <span className="text-slate-200 font-medium">{srbResult.risk_score}/10</span>
+                    </div>
+                  </div>
+                  {srbResult.anti_patterns?.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">Anti-Patterns</p>
+                      {srbResult.anti_patterns.slice(0, 3).map((p, i) => (
+                        <div key={i} className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                          <span className="text-amber-500 shrink-0">▸</span>
+                          {typeof p === 'string' ? p : `${p.name}: ${p.description}`}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {srbResult.ai_rationale && (
+                    <p className="text-[11px] text-slate-400 border-t border-[#1e2d45] pt-2 line-clamp-4">
+                      {srbResult.ai_rationale}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Schema Diff */}
+          <div className="bg-[#0d1526] border border-[#1e2d45] rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-[#1e2d45] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <GitCompare size={13} className="text-cyan-400" />
+                <span className="text-xs font-medium text-slate-300">Schema Diff</span>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25">● MOCK</span>
+                <span className="text-[9px] text-slate-600">payment-v1 → v2</span>
+              </div>
+              <button
+                onClick={handleLoadDiff}
+                disabled={diffLoading}
+                className="text-xs text-cyan-400 hover:text-cyan-300 disabled:text-slate-600 transition-colors flex items-center gap-1"
+              >
+                {diffLoading ? <Loader2 size={11} className="animate-spin" /> : null}
+                {diffLoading ? 'Loading…' : 'Load Sample'}
+              </button>
+            </div>
+            <div className="p-4">
+              {!schemaDiff && !diffLoading && (
+                <p className="text-[11px] text-slate-600">
+                  Click "Load Sample" to run a payment service v1→v2 schema diff with blast radius.
+                </p>
+              )}
+              {diffLoading && (
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Loader2 size={12} className="animate-spin" />
+                  Computing schema diff…
+                </div>
+              )}
+              {schemaDiff && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className={clsx(
+                      'text-xs font-semibold px-2 py-1 rounded',
+                      schemaDiff.breaking_count > 0 ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300',
+                    )}>
+                      {schemaDiff.breaking_count} breaking
+                    </div>
+                    <span className="text-xs text-slate-500">{schemaDiff.total_count} total changes</span>
+                  </div>
+                  {schemaDiff.changes.filter(c => c.is_breaking).slice(0, 3).map((c, i) => (
+                    <div key={i} className="flex items-start gap-2 text-[11px]">
+                      <span className="text-red-400 shrink-0 font-mono text-[10px] mt-0.5">BREAK</span>
+                      <span className="text-slate-400">{c.location} — {c.reason}</span>
+                    </div>
+                  ))}
+                  {schemaDiff.blast_radius && (
+                    <div className="border-t border-[#1e2d45] pt-2 text-[11px] text-slate-400">
+                      Blast radius: <span className="text-slate-200">{schemaDiff.blast_radius.total_impacted} services</span>
+                      {' '}impacted · Risk: <span className={
+                        schemaDiff.blast_radius.risk_level === 'critical' ? 'text-red-300'
+                        : schemaDiff.blast_radius.risk_level === 'high' ? 'text-orange-300'
+                        : 'text-yellow-300'
+                      }>{schemaDiff.blast_radius.risk_level}</span>
+                    </div>
+                  )}
+                  {schemaDiff.blast_radius?.ai_analysis && (
+                    <div className="border-t border-[#1e2d45] pt-2 prose-dark text-[11px] leading-relaxed text-slate-400">
+                      <ReactMarkdown>{schemaDiff.blast_radius.ai_analysis}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

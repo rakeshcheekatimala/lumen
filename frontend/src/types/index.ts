@@ -66,6 +66,7 @@ export interface BlastRadiusResult {
   total_impacted: number
   risk_level: 'critical' | 'high' | 'medium' | 'low'
   ai_analysis?: string
+  ai_mode?: string   // "real" | "mock" | "none"
   propagation_paths: string[][]
 }
 
