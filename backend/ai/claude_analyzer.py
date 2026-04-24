@@ -1,5 +1,6 @@
 """Claude-powered analysis for blast radius, SRB validation, and RCA."""
 import os
+import logging
 import anthropic
 from graph.models import (
     BlastRadiusResult, RCAResult, ChangeRequest, SRBValidation, SchemaDiffResult,
@@ -8,6 +9,8 @@ from graph.models import (
 
 MOCK_AI = os.environ.get("MOCK_AI", "false").lower() == "true"
 
+logger = logging.getLogger(__name__)
+
 _client: anthropic.Anthropic | None = None
 
 def _get_client() -> anthropic.Anthropic:
@@ -15,6 +18,36 @@ def _get_client() -> anthropic.Anthropic:
     if _client is None:
         _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     return _client
+
+
+def _call_claude(fn_name: str, max_tokens: int, messages: list[dict]) -> str:
+    """
+    Single call site for all Claude API requests.
+    Logs prompt size, token usage, stop reason, and response preview.
+    """
+    prompt_chars = sum(len(m.get("content", "")) for m in messages)
+    logger.info(
+        "[claude] %s | model=%s | max_tokens=%d | prompt_chars=%d",
+        fn_name, MODEL, max_tokens, prompt_chars,
+    )
+
+    msg = _get_client().messages.create(
+        model=MODEL,
+        max_tokens=max_tokens,
+        messages=messages,
+    )
+
+    text = msg.content[0].text
+    usage = msg.usage
+    logger.info(
+        "[claude] %s | input_tokens=%d | output_tokens=%d | stop=%s | preview=%.120r",
+        fn_name,
+        usage.input_tokens,
+        usage.output_tokens,
+        msg.stop_reason,
+        text,
+    )
+    return text
 
 MODEL = "claude-sonnet-4-6"
 
@@ -170,12 +203,7 @@ Using the full org graph context above, provide a concise analysis:
 
 Format with clear headings. Be specific, actionable, under 300 words."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    return _call_claude("analyze_blast_radius", 600, [{"role": "user", "content": prompt}])
 
 
 def analyze_rca(
@@ -214,12 +242,7 @@ Using the full org graph above, provide a rapid RCA:
 
 Be direct and actionable. Under 250 words."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=500,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    return _call_claude("analyze_rca", 500, [{"role": "user", "content": prompt}])
 
 
 # ─── SRB narrative rationale ──────────────────────────────────────────────────
@@ -296,12 +319,7 @@ Using the full org graph context above, write a concise architect's rationale (u
 
 Format with clear markdown headings. Be direct and specific."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    return _call_claude("analyze_srb", 600, [{"role": "user", "content": prompt}])
 
 
 # ─── Schema diff narrative ────────────────────────────────────────────────────
@@ -358,12 +376,7 @@ Using the org graph above, provide migration guidance (under 200 words):
 
 Be concise and actionable."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    return _call_claude("analyze_schema_diff", 400, [{"role": "user", "content": prompt}])
 
 
 # ─── Legacy free-text SRB (kept for old endpoint) ─────────────────────────────
@@ -399,13 +412,8 @@ Respond in JSON format:
   "summary": "one paragraph summary"
 }}"""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    )
     import json
-    text = message.content[0].text
+    text = _call_claude("validate_srb_design", 800, [{"role": "user", "content": prompt}])
     try:
         start = text.find("{")
         end = text.rfind("}") + 1
