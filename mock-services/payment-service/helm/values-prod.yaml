@@ -1,0 +1,9 @@
+replicaCount: 5
+
+config:
+  fraud:
+    url: http://fraud-service.risk.svc.cluster.local:8082
+  notification:
+    url: http://notification-service.platform.svc.cluster.local:8083
+  kafka:
+    bootstrapServers: kafka.infra.svc.cluster.local:9092

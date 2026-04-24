@@ -1,0 +1,9 @@
+replicaCount: 2
+
+service:
+  port: 8084
+
+config:
+  stockWarningThreshold: 10
+
+# No upstream service dependencies — standalone store

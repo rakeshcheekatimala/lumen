@@ -1,0 +1,10 @@
+replicaCount: 2
+
+service:
+  port: 8082
+
+config:
+  blocklist:
+    refreshIntervalSeconds: 60
+
+# No upstream service dependencies — standalone scorer

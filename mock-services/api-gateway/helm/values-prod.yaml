@@ -1,0 +1,7 @@
+replicaCount: 3
+
+config:
+  payment:
+    url: http://payment-service.payments.svc.cluster.local:8080
+  order:
+    url: http://order-service.orders.svc.cluster.local:8081

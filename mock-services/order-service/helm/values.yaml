@@ -1,0 +1,14 @@
+replicaCount: 2
+
+service:
+  port: 8081
+
+config:
+  payment:
+    url: http://payment-service:8080
+  inventory:
+    url: http://inventory-service:8084
+
+env:
+  PAYMENT_SERVICE_URL: http://payment-service:8080
+  INVENTORY_SERVICE_URL: http://inventory-service:8084

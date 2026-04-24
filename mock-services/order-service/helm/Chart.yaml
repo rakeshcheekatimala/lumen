@@ -1,0 +1,9 @@
+apiVersion: v2
+name: order-service
+description: Order lifecycle — reserve inventory, trigger payment
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+maintainers:
+  - name: orders-team
+    email: orders@lumen.internal

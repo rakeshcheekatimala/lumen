@@ -1,0 +1,14 @@
+replicaCount: 1
+
+service:
+  port: 3000
+
+config:
+  payment:
+    url: http://payment-service:8080
+  order:
+    url: http://order-service:8081
+
+env:
+  PAYMENT_SERVICE_URL: http://payment-service:8080
+  ORDER_SERVICE_URL: http://order-service:8081

@@ -1,7 +1,11 @@
 """FastAPI backend for the AI-Powered Architectural Intelligence Platform."""
 import os
+import logging
+import traceback
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -277,6 +281,16 @@ def ingest_multiple_repos(request: MultiRepoIngestRequest):
     Scans multiple repositories in one operation, detects cross-repo edges,
     and groups repos by shared parent directory.
     """
+    try:
+        return _ingest_multiple_repos(request)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("ingest_multiple_repos failed:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
+
+
+def _ingest_multiple_repos(request: MultiRepoIngestRequest) -> MultiRepoIngestResponse:
     if not request.repo_paths:
         raise HTTPException(status_code=400, detail="repo_paths must not be empty")
 

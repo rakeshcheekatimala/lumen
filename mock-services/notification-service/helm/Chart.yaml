@@ -1,0 +1,9 @@
+apiVersion: v2
+name: notification-service
+description: Sends email/push notifications — consumes payment-events Kafka topic
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+maintainers:
+  - name: platform-team
+    email: platform@lumen.internal

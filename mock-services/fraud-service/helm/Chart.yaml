@@ -1,0 +1,9 @@
+apiVersion: v2
+name: fraud-service
+description: Real-time fraud scoring for payment transactions
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+maintainers:
+  - name: risk-team
+    email: risk@lumen.internal

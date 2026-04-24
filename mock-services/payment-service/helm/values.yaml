@@ -1,0 +1,18 @@
+replicaCount: 2
+
+service:
+  port: 8080
+
+config:
+  fraud:
+    url: http://fraud-service:8082
+  notification:
+    url: http://notification-service:8083
+  kafka:
+    bootstrapServers: kafka:9092
+    topic: payment-events
+
+env:
+  FRAUD_SERVICE_URL: http://fraud-service:8082
+  NOTIFICATION_SERVICE_URL: http://notification-service:8083
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092

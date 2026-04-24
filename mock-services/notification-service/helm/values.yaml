@@ -1,0 +1,13 @@
+replicaCount: 1
+
+service:
+  port: 8083
+
+config:
+  kafka:
+    bootstrapServers: kafka:9092
+    topic: payment-events
+    groupId: notification-group
+
+env:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
