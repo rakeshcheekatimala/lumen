@@ -1,12 +1,12 @@
-# ArchIntel
+# Lumen
 
-> AI-Powered Architectural Intelligence Platform for microservices dependency analysis, change impact simulation, and service governance.
+> **Live Unified Meta Engine** — AI-powered platform for microservices dependency analysis, change impact simulation, and service governance.
 
 ---
 
 ## What It Does
 
-ArchIntel ingests your microservices topology (via OpenTelemetry traces, OpenAPI specs, or repo scanning) and uses Claude AI to reason about:
+Lumen ingests your microservices topology (via OpenTelemetry traces, OpenAPI specs, or repo scanning) and uses Claude AI to reason about:
 
 - **Dependency Graph** — visual map of which service calls which, with risk scores
 - **Change Impact Simulator** — blast radius analysis before you deploy
