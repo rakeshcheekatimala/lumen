@@ -9,6 +9,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        // ws: true,  ← REMOVED: WebSocket connects directly to :8000, not through proxy
       },
     },
   },

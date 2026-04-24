@@ -10,6 +10,8 @@ import SRBComposer from './components/SRBComposer'
 import SRBScorecard from './components/SRBScorecard'
 import SchemaDiffView from './components/SchemaDiffView'
 import RepoScanner from './components/RepoScanner'
+import ChatPanel from './components/ChatPanel'
+import { useChat } from './hooks/useChat'
 import { Loader2, AlertCircle } from 'lucide-react'
 
 type RightPanel = 'blast-radius' | 'service-detail' | null
@@ -30,6 +32,9 @@ export default function App() {
   const [rightPanel, setRightPanel] = useState<RightPanel>(null)
 
   const [srbResult, setSrbResult] = useState<SRBValidation | null>(null)
+
+  const [chatOpen, setChatOpen] = useState(false)
+  const { messages, unreadCount, username, sendMessage, clearUnread, isConnected } = useChat()
 
   useEffect(() => {
     const load = async () => {
@@ -76,6 +81,21 @@ export default function App() {
     setSelectedService(null)
   }, [])
 
+  const handleToggleChat = useCallback(() => {
+    const newState = !chatOpen
+    setChatOpen(newState)
+    if (newState) {
+      clearUnread()
+    }
+  }, [chatOpen, clearUnread])
+
+  const handleShareToChat = useCallback((result: BlastRadiusResult) => {
+    const description = `${result.changed_service_name} (${result.change_type.replace(/_/g, ' ')})`
+    sendMessage(description, 'blast_radius', result)
+    setChatOpen(true)
+    clearUnread()
+  }, [sendMessage, clearUnread])
+
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-[#080c14]">
@@ -112,6 +132,8 @@ export default function App() {
         isHealthy={isHealthy}
         view={view}
         onViewChange={setView}
+        unreadCount={unreadCount}
+        onChatToggle={handleToggleChat}
       />
 
       {view === 'graph' && (
@@ -191,6 +213,7 @@ export default function App() {
                   result={blastRadius}
                   loading={aiLoading}
                   onClose={handleCloseRight}
+                  onShareToChat={handleShareToChat}
                 />
               )}
               {rightPanel === 'service-detail' && selectedService && (
@@ -200,6 +223,16 @@ export default function App() {
                 />
               )}
             </div>
+          )}
+
+          {/* Chat panel */}
+          {chatOpen && (
+            <ChatPanel
+              messages={messages}
+              username={username}
+              onSendMessage={sendMessage}
+              isConnected={isConnected}
+            />
           )}
         </div>
       )}

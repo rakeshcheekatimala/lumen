@@ -1,6 +1,9 @@
 """Claude-powered analysis for blast radius, SRB validation, and RCA."""
 import os
+import logging
 import anthropic
+logger = logging.getLogger(__name__)
+
 from graph.models import BlastRadiusResult, RCAResult, ChangeRequest, SRBValidation, SchemaDiffResult
 
 MOCK_AI = os.environ.get("MOCK_AI", "false").lower() == "true"
@@ -99,11 +102,20 @@ def _format_impacted(result: BlastRadiusResult) -> str:
 
 
 def analyze_blast_radius(result: BlastRadiusResult, change: ChangeRequest) -> str:
+    logger.info(f"[ANALYZER] analyze_blast_radius called for {result.changed_service}")
+    logger.info(f"[ANALYZER] MOCK_AI={MOCK_AI}")
+    
     if MOCK_AI:
+        logger.info(f"[ANALYZER] Using mock response")
         return _mock_blast_radius(result, change)
 
-    impacted_text = _format_impacted(result)
-    prompt = f"""You are an expert platform architect at a large e-commerce company analyzing the impact of a microservice change.
+    logger.info(f"[ANALYZER] Using real Claude API (model={MODEL})")
+    
+    try:
+        impacted_text = _format_impacted(result)
+        logger.info(f"[ANALYZER] Formatted impacted text: {len(impacted_text)} chars")
+        
+        prompt = f"""You are an expert platform architect at a large e-commerce company analyzing the impact of a microservice change.
 
 ## Change Details
 - **Service**: {result.changed_service_name}
@@ -125,12 +137,23 @@ Please provide a concise analysis with:
 
 Format with clear headings. Be specific, actionable, and concise (under 300 words)."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+        logger.info(f"[ANALYZER] Getting client...")
+        client = _get_client()
+        logger.info(f"[ANALYZER] Client obtained, calling Claude...")
+        
+        message = client.messages.create(
+            model=MODEL,
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        
+        response = message.content[0].text
+        logger.info(f"[ANALYZER] ✓ Got Claude response: {len(response)} chars")
+        return response
+        
+    except Exception as e:
+        logger.error(f"[ANALYZER] ✗ Error calling Claude: {e}", exc_info=True)
+        raise
 
 
 def analyze_rca(rca: RCAResult, request_description: str, incident_service: str) -> str:

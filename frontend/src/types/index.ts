@@ -221,3 +221,17 @@ export interface MultiRepoIngestResponse {
   cross_repo_edges: ServiceEdge[]
   message: string
 }
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+export type ChatMessageType = 'text' | 'blast_radius' | 'system'
+
+export interface ChatMessage {
+  id: string
+  username: string
+  user_id: string
+  type: ChatMessageType
+  content: string
+  blast_radius?: BlastRadiusResult
+  timestamp: string
+}

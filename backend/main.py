@@ -2,13 +2,17 @@
 import os
 import logging
 import traceback
+import asyncio
+import uuid
+from datetime import datetime
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -22,6 +26,7 @@ from graph.models import (
     SchemaDiffRequest, SchemaDiffResult,
     MultiRepoIngestRequest, MultiRepoIngestResponse,
     RepoGroup, RepoScanResult,
+    ChatMessage, ChatMessageType,
 )
 from graph.srb_analyzer import validate_srb as run_srb_validation
 from graph.schema_diff import diff_specs
@@ -33,6 +38,7 @@ from ingestion.swagger_parser import parse_openapi_spec
 from ingestion.repo_scanner import RepoScanner
 from ai.repo_analyzer import analyze_repo, to_graph_models
 from ingestion.multi_repo_scanner import scan_multiple_repos, group_by_parent_directory
+from chat.store import connection_manager, chat_store
 
 
 @asynccontextmanager
@@ -404,3 +410,329 @@ def health():
         "services": len(builder.services),
         "edges": len(builder.edges),
     }
+
+
+# ─── Chat ─────────────────────────────────────────────────────────────────────
+
+@app.get("/api/chat/messages")
+def get_chat_messages():
+    """Returns the last N chat messages."""
+    messages = chat_store.get_messages()
+    logger.info(f"[CHAT] GET /chat/messages -> {len(messages)} messages")
+    return messages
+
+
+@app.websocket("/api/ws/chat")
+async def websocket_chat(websocket: WebSocket):
+    """WebSocket endpoint for real-time chat. Broadcasts messages to all connected clients."""
+    client_id = str(uuid.uuid4())[:8]
+    logger.info(f"[WS-{client_id}] ========== CONNECTION ATTEMPT ==========")
+    logger.info(f"[WS-{client_id}] Client connecting from {websocket.client}")
+    
+    try:
+        await connection_manager.connect(websocket)
+        logger.info(f"[WS-{client_id}] ✓ WebSocket accepted and stored")
+        logger.info(f"[WS-{client_id}] Total active connections: {len(connection_manager.active_connections)}")
+        
+        # Send a welcome message to verify connection works
+        try:
+            welcome_msg = ChatMessage(
+                id=str(uuid.uuid4()),
+                username="Lumen",
+                user_id="system",
+                type=ChatMessageType.system,
+                content="✓ Connected to Lumen Chat. Ready to analyze blast radius impacts!",
+                blast_radius=None,
+                timestamp=datetime.utcnow().isoformat(),
+            )
+            logger.info(f"[WS-{client_id}] Creating welcome message: {welcome_msg.id}")
+            
+            welcome_dict = welcome_msg.model_dump()
+            logger.info(f"[WS-{client_id}] Welcome dict keys: {welcome_dict.keys()}")
+            
+            await websocket.send_json(welcome_dict)
+            logger.info(f"[WS-{client_id}] ✓✓✓ Welcome message SENT to client")
+        except Exception as e:
+            logger.error(f"[WS-{client_id}] ✗ Failed to send welcome message: {e}", exc_info=True)
+        
+        # Now listen for messages
+        logger.info(f"[WS-{client_id}] Starting message listen loop...")
+        
+        while True:
+            logger.info(f"[WS-{client_id}] Waiting for message...")
+            data = await websocket.receive_json()
+            logger.info(f"[WS-{client_id}] ✓ RECEIVED JSON: {data}")
+            logger.info(f"[WS-{client_id}] Keys in received data: {data.keys()}")
+            
+            # Create ChatMessage from received data
+            try:
+                msg = ChatMessage(
+                    id=str(uuid.uuid4()),
+                    username=data.get("username", "Unknown"),
+                    user_id=data.get("user_id", ""),
+                    type=ChatMessageType(data.get("type", "text")),
+                    content=data.get("content", ""),
+                    blast_radius=data.get("blast_radius"),
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+                logger.info(f"[WS-{client_id}] ✓ ChatMessage created: {msg.id}")
+                logger.info(f"[WS-{client_id}] Message details: type={msg.type}, username={msg.username}, content_len={len(msg.content)}")
+            except Exception as e:
+                logger.error(f"[WS-{client_id}] ✗ Failed to create ChatMessage: {e}", exc_info=True)
+                continue
+            
+            # Store message
+            try:
+                chat_store.add_message(msg.model_dump())
+                logger.info(f"[WS-{client_id}] ✓ Message stored in ChatStore")
+                logger.info(f"[WS-{client_id}] Total messages in store: {len(chat_store.get_messages())}")
+            except Exception as e:
+                logger.error(f"[WS-{client_id}] ✗ Failed to store message: {e}", exc_info=True)
+            
+            # Broadcast to all clients
+            try:
+                logger.info(f"[WS-{client_id}] Preparing to broadcast to {len(connection_manager.active_connections)} connections")
+                msg_dict = msg.model_dump()
+                logger.info(f"[WS-{client_id}] Message dict size: {len(str(msg_dict))} chars")
+                
+                await connection_manager.broadcast(msg_dict)
+                logger.info(f"[WS-{client_id}] ✓✓✓ BROADCAST COMPLETE")
+            except Exception as e:
+                logger.error(f"[WS-{client_id}] ✗ Broadcast failed: {e}", exc_info=True)
+            
+            # Trigger AI response for blast radius messages
+            if msg.type == ChatMessageType.blast_radius:
+                logger.info(f"[WS-{client_id}] Detected blast_radius message, spawning AI task")
+                asyncio.create_task(_ai_chat_reply(msg))
+            elif "blast" in msg.content.lower() or "impact" in msg.content.lower():
+                logger.info(f"[WS-{client_id}] Detected potential AI trigger keywords, spawning text AI task")
+                asyncio.create_task(_ai_text_response(msg))
+            else:
+                logger.info(f"[WS-{client_id}] No AI trigger detected for this message")
+                
+    except Exception as e:
+        logger.error(f"[WS-{client_id}] ✗ FATAL ERROR in WebSocket loop: {e}", exc_info=True)
+    finally:
+        logger.info(f"[WS-{client_id}] WebSocket connection closing...")
+        try:
+            connection_manager.disconnect(websocket)
+            logger.info(f"[WS-{client_id}] ✓ Disconnected. Remaining connections: {len(connection_manager.active_connections)}")
+        except Exception as e:
+            logger.error(f"[WS-{client_id}] ✗ Error during disconnect: {e}")
+        logger.info(f"[WS-{client_id}] ========== CONNECTION CLOSED ==========")
+
+async def _ai_chat_reply(source_msg: ChatMessage):
+    """Generate and broadcast AI response to a blast_radius message with graph context."""
+    logger.info(f"[CHAT AI] ========== AI REPLY STARTED for {source_msg.id} ==========")
+    try:
+        if not source_msg.blast_radius:
+            logger.info(f"[CHAT AI] ✗ No blast_radius in message, skipping")
+            return
+        
+        logger.info(f"[CHAT AI] ✓ Found blast_radius, generating response")
+        
+        # Get the blast radius result
+        result = source_msg.blast_radius
+        logger.info(f"[CHAT AI] Service: {result.changed_service}, Endpoint: {result.changed_endpoint}")
+        
+        # Get the full dependency graph for context
+        logger.info(f"[CHAT AI] Loading full knowledge graph...")
+        builder = get_graph_builder()
+        graph = builder.to_dependency_graph()
+        logger.info(f"[CHAT AI] Graph loaded: {len(graph.services)} services, {len(graph.edges)} edges")
+        
+        # Create a synthetic ChangeRequest for analyze_blast_radius
+        change = ChangeRequest(
+            service_id=result.changed_service,
+            endpoint_id=result.changed_endpoint,
+            change_type=result.change_type,
+            description=f"Service: {result.changed_service_name}",
+        )
+        logger.info(f"[CHAT AI] Created ChangeRequest: {change}")
+        
+        # Generate AI analysis WITH graph context
+        logger.info(f"[CHAT AI] Calling analyze_blast_radius_with_graph...")
+        try:
+            ai_response = analyze_blast_radius_with_graph(result, change, graph)
+            logger.info(f"[CHAT AI] ✓ Got AI response, length: {len(ai_response)} chars")
+            logger.info(f"[CHAT AI] Response preview: {ai_response[:200]}")
+        except Exception as ai_error:
+            logger.error(f"[CHAT AI] ✗ Analysis failed: {ai_error}, falling back to basic analysis", exc_info=True)
+            try:
+                ai_response = analyze_blast_radius(result, change)
+            except:
+                ai_response = f"Error analyzing blast radius: {str(ai_error)}"
+        
+        # Create and broadcast AI message
+        logger.info(f"[CHAT AI] Creating ChatMessage for AI response")
+        ai_msg = ChatMessage(
+            id=str(uuid.uuid4()),
+            username="Lumen AI",
+            user_id="system",
+            type=ChatMessageType.system,
+            content=ai_response,
+            blast_radius=None,
+            timestamp=datetime.utcnow().isoformat(),
+        )
+        
+        logger.info(f"[CHAT AI] Storing message: {ai_msg.id}")
+        chat_store.add_message(ai_msg.model_dump())
+        
+        logger.info(f"[CHAT AI] Broadcasting to {len(connection_manager.active_connections)} connections")
+        await connection_manager.broadcast(ai_msg.model_dump())
+        logger.info(f"[CHAT AI] ✓ Response broadcasted successfully")
+        logger.info(f"[CHAT AI] ========== AI REPLY COMPLETED ==========")
+        
+    except Exception as e:
+        logger.error(f"[CHAT AI] ✗ FATAL ERROR: {e}", exc_info=True)
+        logger.info(f"[CHAT AI] ========== AI REPLY FAILED ==========")
+
+
+async def _should_trigger_ai_response(msg: ChatMessage) -> bool:
+    """Check if a text message should trigger AI response."""
+    keywords = ['blast', 'radius', 'impact', 'change', 'analyze', 'analysis', 'help', 'effect', 'service']
+    content_lower = msg.content.lower()
+    return any(keyword in content_lower for keyword in keywords)
+
+
+async def _ai_text_response(source_msg: ChatMessage) -> str:
+    """Generate AI response to a text message asking about blast radius analysis."""
+    logger.info(f"[TEXT AI] Generating response to: {source_msg.content[:100]}")
+    
+    try:
+        builder = get_graph_builder()
+        graph = builder.to_dependency_graph()
+        
+        # Build a summary of the graph
+        services_summary = "\n".join([f"- {s.name} ({s.language}, team: {s.team})" for s in graph.services[:10]])
+        
+        prompt = f"""The user is asking about blast radius analysis. Here's the current architecture:
+
+{services_summary}
+
+Total services: {len(graph.services)}
+Total dependencies: {len(graph.edges)}
+
+User question: {source_msg.content}
+
+Provide a brief, actionable response about:
+1. Which services are most critical (highest in-degree)
+2. What changes to be careful about
+3. How to analyze blast radius impact
+
+Keep it under 200 words. Be specific to their question."""
+
+        logger.info(f"[TEXT AI] Calling Claude...")
+        from ai.claude_analyzer import _get_client, MODEL, MOCK_AI
+        
+        if MOCK_AI:
+            logger.info(f"[TEXT AI] Using mock response")
+            return f"""Based on the architecture, here are key insights:
+
+**Critical Services:**
+- Payment service (handles all transactions)
+- Checkout service (entry point for purchases)
+- Order service (depends on checkout)
+
+**Blast Radius Strategy:**
+When changing {source_msg.content.split()[-3:] if len(source_msg.content.split()) > 3 else 'critical services'}, analyze:
+1. Who calls this service? (check the graph)
+2. What fields do they expect?
+3. Which breaking changes will cause failures?
+
+**Recommendation:**
+{source_msg.content.count('help') > 0 and 'Review dependencies in the graph visualization first. Then run a blast radius simulation to see impact.' or 'Check if your change affects any downstream services.'}"""
+        
+        client = _get_client()
+        message = client.messages.create(
+            model=MODEL,
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        
+        logger.info(f"[TEXT AI] Got response")
+        return message.content[0].text
+        
+    except Exception as e:
+        logger.error(f"[TEXT AI] Error: {e}", exc_info=True)
+        return f"I encountered an error analyzing your question: {str(e)}"
+
+
+async def _ai_text_response(source_msg: ChatMessage):
+    """Generate and broadcast AI response to a text message asking about architecture."""
+    logger.info(f"[TEXT AI BROADCAST] Starting response generation...")
+    try:
+        builder = get_graph_builder()
+        graph = builder.to_dependency_graph()
+        
+        # Build a summary of the graph
+        services_summary = "\n".join([f"- {s.name} ({s.language}, team: {s.team})" for s in graph.services[:10]])
+        
+        prompt = f"""The user is asking about blast radius analysis. Here's the current architecture:
+
+{services_summary}
+
+Total services: {len(graph.services)}
+Total dependencies: {len(graph.edges)}
+
+User question: {source_msg.content}
+
+Provide a brief, actionable response about:
+1. Which services are most critical (highest in-degree)
+2. What changes to be careful about
+3. How to analyze blast radius impact
+
+Keep it under 200 words. Be specific to their question."""
+
+        logger.info(f"[TEXT AI BROADCAST] Calling Claude...")
+        from ai.claude_analyzer import _get_client, MODEL, MOCK_AI
+        
+        if MOCK_AI:
+            logger.info(f"[TEXT AI BROADCAST] Using mock response")
+            ai_response = f"""Based on the architecture, here are key insights:
+
+**Critical Services:**
+- Payment service (handles all transactions)
+- Checkout service (entry point for purchases)
+- Order service (depends on checkout)
+
+**Blast Radius Strategy:**
+When analyzing changes, check:
+1. Who calls this service? (check the graph)
+2. What fields do they expect?
+3. Which breaking changes will cause failures?
+
+**Recommendation:**
+Review dependencies in the graph visualization first. Then run a blast radius simulation to see actual impact."""
+        else:
+            client = _get_client()
+            message = client.messages.create(
+                model=MODEL,
+                max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            ai_response = message.content[0].text
+        
+        logger.info(f"[TEXT AI BROADCAST] ✓ Got AI response: {len(ai_response)} chars")
+        
+        # CREATE and BROADCAST the response
+        ai_msg = ChatMessage(
+            id=str(uuid.uuid4()),
+            username="Lumen AI",
+            user_id="system",
+            type=ChatMessageType.system,
+            content=ai_response,
+            blast_radius=None,
+            timestamp=datetime.utcnow().isoformat(),
+        )
+        
+        logger.info(f"[TEXT AI BROADCAST] Creating ChatMessage: {ai_msg.id}")
+        chat_store.add_message(ai_msg.model_dump())
+        logger.info(f"[TEXT AI BROADCAST] Stored in ChatStore")
+        
+        logger.info(f"[TEXT AI BROADCAST] Broadcasting to {len(connection_manager.active_connections)} connections")
+        await connection_manager.broadcast(ai_msg.model_dump())
+        logger.info(f"[TEXT AI BROADCAST] ✓✓✓ AI RESPONSE BROADCASTED SUCCESSFULLY")
+        
+    except Exception as e:
+        logger.error(f"[TEXT AI BROADCAST] ✗ FATAL ERROR: {e}", exc_info=True)

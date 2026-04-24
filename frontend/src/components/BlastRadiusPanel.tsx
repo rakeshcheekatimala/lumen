@@ -1,4 +1,4 @@
-import { AlertTriangle, AlertCircle, Info, CheckCircle2, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { AlertTriangle, AlertCircle, Info, CheckCircle2, ChevronDown, ChevronUp, Loader2, Share2 } from 'lucide-react'
 import { useState } from 'react'
 import clsx from 'clsx'
 import ReactMarkdown from 'react-markdown'
@@ -54,9 +54,10 @@ interface Props {
   result: BlastRadiusResult
   loading?: boolean
   onClose: () => void
+  onShareToChat?: (result: BlastRadiusResult) => void
 }
 
-export default function BlastRadiusPanel({ result, loading, onClose }: Props) {
+export default function BlastRadiusPanel({ result, loading, onClose, onShareToChat }: Props) {
   const config = RISK_CONFIG[result.risk_level] || RISK_CONFIG.low
   const Icon = config.icon
 
@@ -72,7 +73,18 @@ export default function BlastRadiusPanel({ result, loading, onClose }: Props) {
             <Icon size={16} className={config.color} />
             <span className="text-sm font-semibold text-slate-100">Blast Radius</span>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+          <div className="flex items-center gap-2">
+            {onShareToChat && (
+              <button
+                onClick={() => onShareToChat(result)}
+                className="text-slate-400 hover:text-cyan-300 transition-colors p-1"
+                title="Share to chat"
+              >
+                <Share2 size={14} />
+              </button>
+            )}
+            <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+          </div>
         </div>
 
         {/* Changed service */}

@@ -1,4 +1,4 @@
-import { Activity, Cpu, Network, ClipboardCheck, GitCompareArrows, ScanSearch } from 'lucide-react'
+import { Activity, Cpu, Network, ClipboardCheck, GitCompareArrows, ScanSearch, MessageSquare } from 'lucide-react'
 import clsx from 'clsx'
 import type { ViewMode } from '../types'
 
@@ -8,6 +8,8 @@ interface Props {
   isHealthy: boolean
   view: ViewMode
   onViewChange: (view: ViewMode) => void
+  unreadCount: number
+  onChatToggle: () => void
 }
 
 const TABS: { id: ViewMode; label: string; icon: typeof Network }[] = [
@@ -17,7 +19,7 @@ const TABS: { id: ViewMode; label: string; icon: typeof Network }[] = [
   { id: 'repo-scan', label: 'Repo Scanner', icon: ScanSearch },
 ]
 
-export default function Header({ serviceCount, edgeCount, isHealthy, view, onViewChange }: Props) {
+export default function Header({ serviceCount, edgeCount, isHealthy, view, onViewChange, unreadCount, onChatToggle }: Props) {
   return (
     <header className="h-14 bg-[#0d1526] border-b border-[#1e2d45] flex items-center px-4 gap-4 shrink-0 z-10">
       {/* Logo */}
@@ -75,6 +77,20 @@ export default function Header({ serviceCount, edgeCount, isHealthy, view, onVie
       </div>
 
       <div className="flex-1" />
+
+      {/* Chat button */}
+      <button
+        onClick={onChatToggle}
+        className="relative p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#111827] transition-colors"
+        title="Toggle chat"
+      >
+        <MessageSquare size={16} />
+        {unreadCount > 0 && (
+          <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </div>
+        )}
+      </button>
 
       {/* Badge */}
       <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
