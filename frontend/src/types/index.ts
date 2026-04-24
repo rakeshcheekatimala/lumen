@@ -218,5 +218,6 @@ export interface MultiRepoIngestResponse {
   groups: RepoGroup[]
   independent_repos: string[]
   per_repo: RepoScanResult[]
+  cross_repo_edges: ServiceEdge[]
   message: string
 }

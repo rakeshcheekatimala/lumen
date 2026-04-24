@@ -1,0 +1,265 @@
+openapi: 3.0.0
+info:
+  title: Order Service
+  version: 1.0.0
+  description: >
+    Manages order lifecycle. Calls payment-service to charge customers and
+    inventory-service to reserve stock.
+  contact:
+    team: commerce
+servers:
+  - url: http://order-service:8085
+    description: Internal cluster DNS
+
+x-dependencies:
+  - service: payment-service
+    url: http://payment-service:8080
+    protocol: http
+    note: Charges customer after order confirmation
+  - service: inventory-service
+    url: http://inventory-service:8084
+    protocol: http
+    note: Reserves items when order is placed
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        '200':
+          description: OK
+
+  /orders:
+    post:
+      summary: Create an order
+      operationId: createOrder
+      description: Reserves inventory, then initiates payment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created and payment initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Validation error
+        '409':
+          description: Insufficient stock
+
+    get:
+      summary: List orders for a customer
+      operationId: listOrders
+      parameters:
+        - name: customer_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [created, confirmed, processing, shipped, delivered, cancelled]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated order list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+
+  /orders/{orderId}:
+    get:
+      summary: Get order details
+      operationId: getOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: Not found
+
+    patch:
+      summary: Update order status
+      operationId: updateOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrderRequest'
+      responses:
+        '200':
+          description: Updated order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+
+  /orders/{orderId}/cancel:
+    post:
+      summary: Cancel an order
+      operationId: cancelOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Order cancelled
+        '409':
+          description: Cannot cancel order in current status
+
+components:
+  schemas:
+    CreateOrderRequest:
+      type: object
+      required: [customer_id, items, payment]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        shipping_address:
+          $ref: '#/components/schemas/Address'
+        payment:
+          $ref: '#/components/schemas/PaymentInfo'
+
+    OrderItem:
+      type: object
+      required: [sku, quantity]
+      properties:
+        sku:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unit_price:
+          type: number
+          format: double
+
+    PaymentInfo:
+      type: object
+      required: [card_token]
+      properties:
+        card_token:
+          type: string
+        idempotency_key:
+          type: string
+
+    Order:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [created, confirmed, processing, shipped, delivered, cancelled]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        total_amount:
+          type: number
+        payment_id:
+          type: string
+          format: uuid
+        payment_status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateOrderRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [confirmed, processing, shipped, delivered]
+        tracking_number:
+          type: string
+
+    Address:
+      type: object
+      properties:
+        street:
+          type: string
+        city:
+          type: string
+        country:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        postal_code:
+          type: string
+
+    OrderListResponse:
+      type: object
+      properties:
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer

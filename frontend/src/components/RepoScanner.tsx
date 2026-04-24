@@ -1,18 +1,19 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   ScanSearch, FolderOpen, Loader2, CheckCircle2, AlertCircle,
-  ChevronRight, Zap, Brain, Layers, GripVertical, X, Link2, Package,
+  ChevronDown, ChevronUp, Zap, Brain, Layers, GripVertical, X, Link2, Package,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ingestMultipleRepos } from '../api/client'
-import type { MultiRepoIngestResponse, RepoGroup, RepoScanResult } from '../types'
+import type { MultiRepoIngestResponse, RepoGroup, RepoScanResult, ServiceNode, ServiceEdge } from '../types'
+import ScanGraph from './ScanGraph'
 
 type Strategy = 'static' | 'ai' | 'both'
 
 interface RepoDraft {
   id: string
   path: string
-  manual: boolean  // true = user typed it (show editable input)
+  manual: boolean
 }
 
 const STRATEGIES: { id: Strategy; label: string; icon: typeof Zap; desc: string }[] = [
@@ -21,19 +22,15 @@ const STRATEGIES: { id: Strategy; label: string; icon: typeof Zap; desc: string 
   { id: 'both',   label: 'Both',   icon: Layers,  desc: 'Merge static + AI (recommended)' },
 ]
 
-interface Props {
-  onGraphUpdated: () => void
-}
-
-export default function RepoScanner({ onGraphUpdated }: Props) {
+export default function RepoScanner() {
   const [basePath, setBasePath]     = useState('')
   const [repoDrafts, setRepoDrafts] = useState<RepoDraft[]>([])
   const [strategy, setStrategy]     = useState<Strategy>('both')
-  const [resetGraph, setResetGraph] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [scanning, setScanning]     = useState(false)
   const [result, setResult]         = useState<MultiRepoIngestResponse | null>(null)
   const [error, setError]           = useState<string | null>(null)
+  const [graphExpanded, setGraphExpanded] = useState(true)
 
   const composePath = (folderName: string): string => {
     const base = basePath.trim().replace(/\/$/, '')
@@ -91,9 +88,9 @@ export default function RepoScanner({ onGraphUpdated }: Props) {
     setError(null)
 
     try {
-      const data = await ingestMultipleRepos(validPaths, strategy, resetGraph)
+      const data = await ingestMultipleRepos(validPaths, strategy, false)
       setResult(data)
-      onGraphUpdated()
+      setGraphExpanded(true)
     } catch (err: unknown) {
       const msg =
         err instanceof Error
@@ -104,6 +101,40 @@ export default function RepoScanner({ onGraphUpdated }: Props) {
       setScanning(false)
     }
   }
+
+  // Collect all scanned services + edges (per-repo + cross-repo) for the graph
+  const { allServices, allEdges } = useMemo<{ allServices: ServiceNode[]; allEdges: ServiceEdge[] }>(() => {
+    if (!result) return { allServices: [], allEdges: [] }
+    const seenIds = new Set<string>()
+    const services: ServiceNode[] = []
+    for (const r of result.per_repo) {
+      for (const svc of r.services) {
+        if (!seenIds.has(svc.id)) {
+          seenIds.add(svc.id)
+          services.push(svc)
+        }
+      }
+    }
+    const seenEdges = new Set<string>()
+    const edges: ServiceEdge[] = []
+    for (const r of result.per_repo) {
+      for (const e of r.edges) {
+        const key = `${e.source}→${e.target}`
+        if (!seenEdges.has(key)) {
+          seenEdges.add(key)
+          edges.push(e)
+        }
+      }
+    }
+    for (const e of (result.cross_repo_edges ?? [])) {
+      const key = `${e.source}→${e.target}`
+      if (!seenEdges.has(key)) {
+        seenEdges.add(key)
+        edges.push(e)
+      }
+    }
+    return { allServices: services, allEdges: edges }
+  }, [result])
 
   const validCount = repoDrafts.filter((d) => d.path.trim()).length
 
@@ -127,7 +158,7 @@ export default function RepoScanner({ onGraphUpdated }: Props) {
           { step: '1', label: 'Service Discovery', detail: 'docker-compose, k8s manifests, Dockerfiles' },
           { step: '2', label: 'Call Detection',    detail: 'HTTP clients, gRPC dials, Kafka topics, env vars' },
           { step: '3', label: 'Cross-Repo Linking', detail: 'Edges that span repos are detected and labeled' },
-          { step: '4', label: 'Graph Load',         detail: 'All services + edges appear in Graph view instantly' },
+          { step: '4', label: 'Graph Render',       detail: 'Topology visualised below scan results' },
         ].map(({ step, label, detail }) => (
           <div key={step} className="flex items-start gap-3">
             <div className="w-5 h-5 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0 mt-0.5">
@@ -243,28 +274,6 @@ export default function RepoScanner({ onGraphUpdated }: Props) {
           </div>
         </div>
 
-        {/* Reset toggle */}
-        <label className="flex items-center gap-3 cursor-pointer group">
-          <div
-            onClick={() => setResetGraph((v) => !v)}
-            className={clsx(
-              'w-9 h-5 rounded-full border transition-colors relative',
-              resetGraph ? 'bg-violet-500/30 border-violet-500/50' : 'bg-slate-800 border-slate-600',
-            )}
-          >
-            <div
-              className={clsx(
-                'absolute top-0.5 w-4 h-4 rounded-full transition-all',
-                resetGraph ? 'left-4 bg-violet-400' : 'left-0.5 bg-slate-500',
-              )}
-            />
-          </div>
-          <div>
-            <span className="text-xs text-slate-300">Reset graph before loading</span>
-            <p className="text-[10px] text-slate-600">Clears existing services and starts fresh</p>
-          </div>
-        </label>
-
         {/* Scan button */}
         <button
           onClick={handleScanAll}
@@ -293,6 +302,49 @@ export default function RepoScanner({ onGraphUpdated }: Props) {
       {/* Results */}
       {result && (
         <div className="space-y-3">
+          {/* Summary */}
+          <div className="bg-[#0d1526] border border-green-500/30 rounded-xl p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={14} className="text-green-400" />
+              <span className="text-sm font-medium text-green-300">Scan complete</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: 'Repos',     value: result.repos_scanned },
+                { label: 'Services',  value: result.total_services_added },
+                { label: 'Edges',     value: result.total_edges_added },
+              ].map(({ label, value }) => (
+                <div key={label} className="bg-[#080c14] rounded-lg p-2 text-center">
+                  <div className="text-lg font-bold text-slate-100">{value}</div>
+                  <div className="text-[10px] text-slate-500">{label}</div>
+                </div>
+              ))}
+            </div>
+            {result.cross_repo_edges_added > 0 && (
+              <p className="text-[11px] text-violet-400">
+                {result.cross_repo_edges_added} cross-repo connection{result.cross_repo_edges_added !== 1 ? 's' : ''} detected
+              </p>
+            )}
+          </div>
+
+          {/* Scanned topology graph */}
+          {allServices.length > 0 && (
+            <div className="space-y-0">
+              <button
+                onClick={() => setGraphExpanded((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-2.5 bg-[#0d1526] border border-[#1e2d45] rounded-t-xl text-xs text-slate-400 hover:text-slate-300 transition-colors"
+              >
+                <span className="font-medium uppercase tracking-wider">Scanned Topology</span>
+                {graphExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+              {graphExpanded && (
+                <div className="border-x border-b border-[#1e2d45] rounded-b-xl overflow-hidden">
+                  <ScanGraph services={allServices} edges={allEdges} />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Linked groups */}
           {result.groups.map((group: RepoGroup) => (
             <div
@@ -363,34 +415,6 @@ export default function RepoScanner({ onGraphUpdated }: Props) {
               </div>
             </div>
           ))}
-
-          {/* Summary footer */}
-          <div className="bg-[#0d1526] border border-green-500/30 rounded-xl p-4 space-y-2">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 size={14} className="text-green-400" />
-              <span className="text-sm font-medium text-green-300">Scan complete</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { label: 'Repos',     value: result.repos_scanned },
-                { label: 'Services',  value: result.total_services_added },
-                { label: 'Edges',     value: result.total_edges_added },
-              ].map(({ label, value }) => (
-                <div key={label} className="bg-[#080c14] rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-slate-100">{value}</div>
-                  <div className="text-[10px] text-slate-500">{label}</div>
-                </div>
-              ))}
-            </div>
-            {result.cross_repo_edges_added > 0 && (
-              <p className="text-[11px] text-violet-400">
-                {result.cross_repo_edges_added} cross-repo connection{result.cross_repo_edges_added !== 1 ? 's' : ''} detected
-              </p>
-            )}
-            <button className="w-full flex items-center justify-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors">
-              Switch to Graph view to explore <ChevronRight size={12} />
-            </button>
-          </div>
         </div>
       )}
 
@@ -418,6 +442,8 @@ export default function RepoScanner({ onGraphUpdated }: Props) {
             'Spring: @FeignClient',
             'Env vars: SERVICE_URL / HOST',
             'AMQP: channel.queue_declare',
+            'Helm: Chart.yaml / values.yaml',
+            'ConfigMap: env var URLs',
           ].map((s) => (
             <div key={s} className="flex items-center gap-1.5 text-[11px] text-slate-500">
               <div className="w-1 h-1 rounded-full bg-violet-500 shrink-0" />

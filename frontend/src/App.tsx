@@ -223,11 +223,7 @@ export default function App() {
 
       {view === 'repo-scan' && (
         <div className="flex-1 overflow-hidden">
-          <RepoScanner
-            onGraphUpdated={() => {
-              fetchGraph().then(setGraph).catch(() => {})
-            }}
-          />
+          <RepoScanner />
         </div>
       )}
     </div>

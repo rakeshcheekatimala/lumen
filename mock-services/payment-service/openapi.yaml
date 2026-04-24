@@ -1,0 +1,280 @@
+openapi: 3.0.0
+info:
+  title: Payment Service
+  version: 2.0.0
+  description: >
+    Core payment processing service. Validates cards via fraud-service,
+    sends confirmation via notification-service, and publishes events to Kafka.
+  contact:
+    team: payments
+servers:
+  - url: http://payment-service:8080
+    description: Internal cluster DNS
+
+x-dependencies:
+  - service: fraud-service
+    url: http://fraud-service:8082
+    protocol: http
+    note: Synchronous fraud check before processing
+  - service: notification-service
+    url: http://notification-service:8083
+    protocol: http
+    note: Async payment confirmation dispatch
+  - service: kafka
+    url: kafka:9092
+    protocol: kafka
+    topic: payment-events
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /payments:
+    post:
+      summary: Process a payment
+      operationId: processPayment
+      description: >
+        Runs synchronous fraud check, then charges the card.
+        Publishes a `payment.completed` event to Kafka on success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessPaymentRequest'
+      responses:
+        '201':
+          description: Payment processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecord'
+        '402':
+          description: Payment declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeclineResponse'
+        '422':
+          description: Fraud hold
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudHoldResponse'
+
+  /payments/{paymentId}:
+    get:
+      summary: Get payment record
+      operationId: getPayment
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Payment record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecord'
+        '404':
+          description: Not found
+
+  /payments/{paymentId}/refund:
+    post:
+      summary: Refund a payment
+      operationId: refundPayment
+      description: Partial or full refund. Publishes `payment.refunded` to Kafka.
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundRequest'
+      responses:
+        '200':
+          description: Refund processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundRecord'
+        '400':
+          description: Refund amount exceeds original
+        '404':
+          description: Payment not found
+
+  /payments/stats:
+    get:
+      summary: Aggregate payment stats
+      operationId: getStats
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Stats summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStats'
+
+components:
+  schemas:
+    ProcessPaymentRequest:
+      type: object
+      required: [amount, currency, customer_id, card_token, order_id]
+      properties:
+        amount:
+          type: number
+          format: double
+          minimum: 0.01
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        customer_id:
+          type: string
+          format: uuid
+        card_token:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+
+    PaymentRecord:
+      type: object
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, declined, refunded, fraud_hold]
+        fraud_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RefundRequest:
+      type: object
+      required: [amount, reason]
+      properties:
+        amount:
+          type: number
+          format: double
+        reason:
+          type: string
+          enum: [customer_request, duplicate, fraudulent, product_not_received]
+
+    RefundRecord:
+      type: object
+      properties:
+        refund_id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+
+    DeclineResponse:
+      type: object
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        decline_code:
+          type: string
+
+    FraudHoldResponse:
+      type: object
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+        fraud_score:
+          type: number
+        review_id:
+          type: string
+          description: Case ID in fraud review queue
+
+    PaymentStats:
+      type: object
+      properties:
+        total_processed:
+          type: integer
+        total_volume:
+          type: number
+        approval_rate:
+          type: number
+        avg_fraud_score:
+          type: number
+        by_currency:
+          type: object
+          additionalProperties:
+            type: number
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        fraud_service:
+          type: string
+        kafka:
+          type: string

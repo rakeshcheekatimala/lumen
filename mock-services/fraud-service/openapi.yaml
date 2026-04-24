@@ -1,0 +1,274 @@
+openapi: 3.0.0
+info:
+  title: Fraud Detection Service
+  version: 1.0.0
+  description: >
+    ML-based fraud scoring. Analyzes transaction signals and returns a risk score.
+    No upstream service dependencies — standalone.
+  contact:
+    team: risk
+servers:
+  - url: http://fraud-service:8082
+    description: Internal cluster DNS
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /score:
+    post:
+      summary: Score a transaction for fraud risk
+      operationId: scoreTransaction
+      description: >
+        Returns a fraud score (0.0 = clean, 1.0 = certain fraud) and a
+        recommendation. Scores ≥ 0.75 should be held for manual review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreRequest'
+      responses:
+        '200':
+          description: Fraud score result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreResult'
+        '400':
+          description: Invalid request
+
+  /score/batch:
+    post:
+      summary: Batch score multiple transactions
+      operationId: batchScore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactions]
+              properties:
+                transactions:
+                  type: array
+                  maxItems: 100
+                  items:
+                    $ref: '#/components/schemas/ScoreRequest'
+      responses:
+        '200':
+          description: Batch results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScoreResult'
+
+  /rules:
+    get:
+      summary: List active fraud rules
+      operationId: listRules
+      responses:
+        '200':
+          description: Active rule list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FraudRule'
+
+  /rules/{ruleId}:
+    put:
+      summary: Update a fraud rule threshold
+      operationId: updateRule
+      parameters:
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRuleRequest'
+      responses:
+        '200':
+          description: Rule updated
+        '404':
+          description: Rule not found
+
+  /review/{reviewId}:
+    get:
+      summary: Get manual review case
+      operationId: getReview
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Review case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCase'
+
+    patch:
+      summary: Resolve a review case
+      operationId: resolveReview
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveReviewRequest'
+      responses:
+        '200':
+          description: Review resolved
+
+components:
+  schemas:
+    ScoreRequest:
+      type: object
+      required: [transaction_id, amount, currency, customer_id, card_token]
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        customer_id:
+          type: string
+          format: uuid
+        card_token:
+          type: string
+        ip_address:
+          type: string
+          format: ipv4
+        device_fingerprint:
+          type: string
+        billing_country:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        merchant_category:
+          type: string
+
+    ScoreResult:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+        score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: 0 = clean, 1 = certain fraud
+        recommendation:
+          type: string
+          enum: [approve, review, decline]
+        triggered_rules:
+          type: array
+          items:
+            type: string
+        review_id:
+          type: string
+          description: Set when recommendation is 'review'
+
+    FraudRule:
+      type: object
+      properties:
+        rule_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        threshold:
+          type: number
+        enabled:
+          type: boolean
+        hit_count_7d:
+          type: integer
+
+    UpdateRuleRequest:
+      type: object
+      properties:
+        threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+        enabled:
+          type: boolean
+
+    ReviewCase:
+      type: object
+      properties:
+        review_id:
+          type: string
+        transaction_id:
+          type: string
+          format: uuid
+        score:
+          type: number
+        status:
+          type: string
+          enum: [pending, approved, declined]
+        assigned_to:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ResolveReviewRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, decline]
+        notes:
+          type: string
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        model_version:
+          type: string
+        rules_loaded:
+          type: integer

@@ -1,0 +1,251 @@
+openapi: 3.0.0
+info:
+  title: Inventory Service
+  version: 1.0.0
+  description: >
+    Manages product stock levels and reservations. No upstream service
+    dependencies — standalone data store.
+  contact:
+    team: commerce
+servers:
+  - url: http://inventory-service:8084
+    description: Internal cluster DNS
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        '200':
+          description: OK
+
+  /inventory/{sku}:
+    get:
+      summary: Get stock level for a SKU
+      operationId: getStock
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stock info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockItem'
+        '404':
+          description: SKU not found
+
+    put:
+      summary: Set absolute stock level
+      operationId: setStock
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetStockRequest'
+      responses:
+        '200':
+          description: Stock updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockItem'
+
+  /inventory/{sku}/reserve:
+    post:
+      summary: Reserve stock for an order
+      operationId: reserveStock
+      description: >
+        Atomically decrements available quantity and creates a reservation.
+        Returns 409 if stock is insufficient.
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveRequest'
+      responses:
+        '201':
+          description: Reservation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '409':
+          description: Insufficient stock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsufficientStockError'
+
+  /inventory/{sku}/release:
+    post:
+      summary: Release a stock reservation
+      operationId: releaseReservation
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reservation_id]
+              properties:
+                reservation_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Reservation released
+
+  /inventory/batch:
+    post:
+      summary: Batch check stock for multiple SKUs
+      operationId: batchCheckStock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skus]
+              properties:
+                skus:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Stock levels for requested SKUs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StockItem'
+
+  /inventory/low-stock:
+    get:
+      summary: List items below warning threshold
+      operationId: getLowStock
+      parameters:
+        - name: threshold
+          in: query
+          schema:
+            type: integer
+            default: 10
+            description: Items with quantity ≤ this are returned
+      responses:
+        '200':
+          description: Low stock items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StockItem'
+                  total:
+                    type: integer
+
+components:
+  schemas:
+    StockItem:
+      type: object
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        quantity_available:
+          type: integer
+        quantity_reserved:
+          type: integer
+        quantity_total:
+          type: integer
+        warehouse:
+          type: string
+        last_updated:
+          type: string
+          format: date-time
+
+    SetStockRequest:
+      type: object
+      required: [quantity]
+      properties:
+        quantity:
+          type: integer
+          minimum: 0
+        warehouse:
+          type: string
+
+    ReserveRequest:
+      type: object
+      required: [order_id, quantity]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        idempotency_key:
+          type: string
+
+    Reservation:
+      type: object
+      properties:
+        reservation_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    InsufficientStockError:
+      type: object
+      properties:
+        sku:
+          type: string
+        requested:
+          type: integer
+        available:
+          type: integer

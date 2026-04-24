@@ -192,4 +192,5 @@ class MultiRepoIngestResponse(BaseModel):
     groups: list[RepoGroup]
     independent_repos: list[str]
     per_repo: list[RepoScanResult]
+    cross_repo_edges: list[ServiceEdge] = []
     message: str

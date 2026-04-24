@@ -244,34 +244,14 @@ def ingest_repo(request: RepoIngestRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    builder = get_graph_builder()
-
-    if request.reset_graph:
-        # Replace graph entirely — reload fresh from topology then add repo services
-        from graph.builder import GraphBuilder
-        import graph.builder as builder_mod
-        builder_mod._builder = GraphBuilder()
-        builder = get_graph_builder()
-
-    for node in nodes:
-        builder.add_service_from_spec(node, [])
-    for edge in edges:
-        if edge.source in builder.services and edge.target in builder.services:
-            builder._edges.append(edge)
-            builder._graph.add_edge(
-                edge.source, edge.target,
-                protocol=edge.protocol,
-                label=edge.label,
-            )
-
-    builder._compute_risk_scores()
+    # Does NOT mutate the org graph — scan results are returned for display only.
 
     return RepoIngestResponse(
         services_added=len(nodes),
         edges_added=len(edges),
         strategy_used=request.strategy,
         summary=ai_summary or f"Scanned {repo_path} via static analysis.",
-        message=f"Loaded {len(nodes)} services and {len(edges)} edges from {Path(repo_path).name}",
+        message=f"Scanned {len(nodes)} services and {len(edges)} edges from {Path(repo_path).name}",
     )
 
 
@@ -305,25 +285,8 @@ def _ingest_multiple_repos(request: MultiRepoIngestRequest) -> MultiRepoIngestRe
         errors = "; ".join(r.error for r in per_repo_results if r.error)
         raise HTTPException(status_code=400, detail=f"All repos failed to scan: {errors}")
 
-    builder = get_graph_builder()
-
-    if request.reset_graph:
-        from graph.builder import GraphBuilder
-        import graph.builder as builder_mod
-        builder_mod._builder = GraphBuilder()
-        builder = get_graph_builder()
-
-    for node in all_nodes:
-        builder.add_service_from_spec(node, [])
-    for edge in all_edges:
-        if edge.source in builder.services and edge.target in builder.services:
-            builder._edges.append(edge)
-            builder._graph.add_edge(
-                edge.source, edge.target,
-                protocol=edge.protocol,
-                label=edge.label,
-            )
-    builder._compute_risk_scores()
+    # Repo scan results are returned as-is — they do NOT mutate the org graph.
+    # The main /api/graph endpoint remains the source of truth for org topology.
 
     groups, independent_repos = group_by_parent_directory(per_repo_results, cross_edges)
 
@@ -344,6 +307,7 @@ def _ingest_multiple_repos(request: MultiRepoIngestRequest) -> MultiRepoIngestRe
         groups=groups,
         independent_repos=independent_repos,
         per_repo=per_repo_results,
+        cross_repo_edges=cross_edges,
         message=(
             f"Scanned {len(per_repo_results)} repos: {len(all_nodes)} services, "
             f"{len(all_edges)} edges ({len(cross_edges)} cross-repo){collision_note}"
