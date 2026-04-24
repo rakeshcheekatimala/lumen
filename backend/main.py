@@ -32,7 +32,7 @@ from graph.srb_analyzer import validate_srb as run_srb_validation
 from graph.schema_diff import diff_specs
 from ai.claude_analyzer import (
     analyze_blast_radius, analyze_rca, validate_srb_design,
-    analyze_srb, analyze_schema_diff,
+    analyze_srb, analyze_schema_diff, analyze_blast_radius_with_graph,
     format_graph_context, MOCK_AI,
 )
 from ingestion.swagger_parser import parse_openapi_spec
@@ -622,7 +622,24 @@ async def _ai_text_response(source_msg: ChatMessage) -> str:
         # Build a summary of the graph
         services_summary = "\n".join([f"- {s.name} ({s.language}, team: {s.team})" for s in graph.services[:10]])
         
-        prompt = f"""The user is asking about blast radius analysis. Here's the current architecture:
+        prompt = f"""You are an AI Architectural Analyst presenting insights for BOTH engineers and business stakeholders.
+
+Transform the architecture context into a clean, decision-ready dashboard.
+
+Output format rules:
+- Start with a 1-line executive summary in plain English
+- Then show Risk Dashboard with at most 4 bullets using 🔴 🟡 🟢
+- Then show Critical Services (Ranked)
+- Then show What Can Break (Blast Radius) with outcome-focused bullets
+- Then show Why This Is Risky (Technical Insight) with only 3 to 4 bullets
+- Then show Recommended Actions with clear owner mindset
+- End with Quick Rule / Heuristic
+- Use generous spacing
+- Avoid long paragraphs
+- No markdown clutter like ### or **
+- Write like a senior engineer explaining to a PM
+
+Here's the current architecture:
 
 {services_summary}
 
@@ -631,33 +648,52 @@ Total dependencies: {len(graph.edges)}
 
 User question: {source_msg.content}
 
-Provide a brief, actionable response about:
-1. Which services are most critical (highest in-degree)
-2. What changes to be careful about
-3. How to analyze blast radius impact
-
-Keep it under 200 words. Be specific to their question."""
+Keep it under 320 words. Be specific to their question and make it look like a clean dashboard."""
 
         logger.info(f"[TEXT AI] Calling Claude...")
         from ai.claude_analyzer import _get_client, MODEL, MOCK_AI
         
         if MOCK_AI:
             logger.info(f"[TEXT AI] Using mock response")
-            return f"""Based on the architecture, here are key insights:
+            return """Executive Summary:
+The services closest to payments and checkout deserve the most caution because issues there can quickly affect revenue-critical flows.
 
-**Critical Services:**
-- Payment service (handles all transactions)
-- Checkout service (entry point for purchases)
-- Order service (depends on checkout)
+Risk Dashboard:
+- 🔴 Highest exposure: Payment and Checkout sit on the main transaction path.
+- 🔴 Cross-service risk: Breaking changes can spread into orders and customer confirmations.
+- 🟡 Operational risk: Shared dependencies raise coordination needs across teams.
+- 🟢 Best control: Run blast radius analysis before changing any service on the purchase path.
 
-**Blast Radius Strategy:**
-When changing {source_msg.content.split()[-3:] if len(source_msg.content.split()) > 3 else 'critical services'}, analyze:
-1. Who calls this service? (check the graph)
-2. What fields do they expect?
-3. Which breaking changes will cause failures?
+Critical Services (Ranked):
+1. Payment
+Why it is critical: It supports transaction completion for multiple flows.
+Impact: Customers may be unable to pay successfully.
 
-**Recommendation:**
-{source_msg.content.count('help') > 0 and 'Review dependencies in the graph visualization first. Then run a blast radius simulation to see impact.' or 'Check if your change affects any downstream services.'}"""
+2. Checkout
+Why it is critical: It orchestrates the purchase path and calls downstream services.
+Impact: Orders may stall before completion.
+
+3. Order
+Why it is critical: It converts successful checkout into confirmed orders.
+Impact: Customers may pay but not see confirmed purchases.
+
+What Can Break (Blast Radius):
+- Payments may fail.
+- Orders may not be confirmed.
+- Customer notifications may be delayed or missing.
+
+Why This Is Risky (Technical Insight):
+- These services have multiple downstream dependents.
+- Contract changes can fail consumers immediately.
+- Shared transaction paths need coordinated rollout order.
+
+Recommended Actions:
+- Service owner: confirm all direct consumers before making breaking changes.
+- Platform team: run blast radius simulation before release approval.
+- QA owner: validate the full purchase flow end to end.
+
+Quick Rule / Heuristic:
+If the service sits on the payment path, treat every breaking change as a cross-team release."""
         
         client = _get_client()
         message = client.messages.create(
@@ -684,7 +720,24 @@ async def _ai_text_response(source_msg: ChatMessage):
         # Build a summary of the graph
         services_summary = "\n".join([f"- {s.name} ({s.language}, team: {s.team})" for s in graph.services[:10]])
         
-        prompt = f"""The user is asking about blast radius analysis. Here's the current architecture:
+        prompt = f"""You are an AI Architectural Analyst presenting insights for BOTH engineers and business stakeholders.
+
+Transform the architecture context into a clean, decision-ready dashboard.
+
+Output format rules:
+- Start with a 1-line executive summary in plain English
+- Then show Risk Dashboard with at most 4 bullets using 🔴 🟡 🟢
+- Then show Critical Services (Ranked)
+- Then show What Can Break (Blast Radius) with outcome-focused bullets
+- Then show Why This Is Risky (Technical Insight) with only 3 to 4 bullets
+- Then show Recommended Actions with clear owner mindset
+- End with Quick Rule / Heuristic
+- Use generous spacing
+- Avoid long paragraphs
+- No markdown clutter like ### or **
+- Write like a senior engineer explaining to a PM
+
+Here's the current architecture:
 
 {services_summary}
 
@@ -693,33 +746,52 @@ Total dependencies: {len(graph.edges)}
 
 User question: {source_msg.content}
 
-Provide a brief, actionable response about:
-1. Which services are most critical (highest in-degree)
-2. What changes to be careful about
-3. How to analyze blast radius impact
-
-Keep it under 200 words. Be specific to their question."""
+Keep it under 320 words. Be specific to their question and make it look like a clean dashboard."""
 
         logger.info(f"[TEXT AI BROADCAST] Calling Claude...")
         from ai.claude_analyzer import _get_client, MODEL, MOCK_AI
         
         if MOCK_AI:
             logger.info(f"[TEXT AI BROADCAST] Using mock response")
-            ai_response = f"""Based on the architecture, here are key insights:
+            ai_response = """Executive Summary:
+Changes on shared transaction services can quickly affect customer-facing workflows, so they need coordinated rollout discipline.
 
-**Critical Services:**
-- Payment service (handles all transactions)
-- Checkout service (entry point for purchases)
-- Order service (depends on checkout)
+Risk Dashboard:
+- 🔴 Highest exposure: Payment and Checkout influence the main revenue path.
+- 🔴 Downstream impact: Order handling and confirmations can fail if contracts drift.
+- 🟡 Team risk: Cross-service ownership increases release coordination needs.
+- 🟢 Mitigation: Validate dependencies before release and roll out in stages.
 
-**Blast Radius Strategy:**
-When analyzing changes, check:
-1. Who calls this service? (check the graph)
-2. What fields do they expect?
-3. Which breaking changes will cause failures?
+Critical Services (Ranked):
+1. Payment
+Why it is critical: It supports core transaction execution across flows.
+Impact: Customers may not be able to complete purchases.
 
-**Recommendation:**
-Review dependencies in the graph visualization first. Then run a blast radius simulation to see actual impact."""
+2. Checkout
+Why it is critical: It connects the user journey to downstream execution services.
+Impact: Orders may drop before completion.
+
+3. Order
+Why it is critical: It finalizes the purchase workflow after checkout.
+Impact: Paid orders may not appear correctly.
+
+What Can Break (Blast Radius):
+- Payments may fail.
+- Orders may not complete.
+- Customer confirmations may not arrive.
+
+Why This Is Risky (Technical Insight):
+- Shared services have multiple dependents.
+- Breaking contracts create fast downstream failures.
+- Release order matters when consumers depend on old fields or endpoints.
+
+Recommended Actions:
+- Service owner: verify consumers before changing contracts.
+- Platform team: inspect dependency graph and run blast radius analysis.
+- QA owner: test the full purchase flow before rollout.
+
+Quick Rule / Heuristic:
+If a service feeds revenue-critical flows, never ship a breaking change without consumer confirmation."""
         else:
             client = _get_client()
             message = client.messages.create(

@@ -54,31 +54,111 @@ def _call_claude(fn_name: str, max_tokens: int, messages: list[dict]) -> str:
 MODEL = "claude-sonnet-4-6"
 
 
+def _blast_radius_dashboard_style() -> str:
+    return """You are an AI Architectural Analyst presenting insights for BOTH engineers and business stakeholders.
+
+Your job is to transform raw dependency/blast radius analysis into a clean, structured, decision-ready format.
+
+Follow these STRICT rules:
+
+Start with a 1-line executive summary
+Plain English
+No jargon
+
+Then show a Risk Dashboard
+Use emojis:
+- 🔴 High Risk
+- 🟡 Medium Risk
+- 🟢 Low Risk
+Max 4 bullet points
+
+Then show Critical Services (Ranked)
+For each service:
+- Name
+- Why it is critical (1 line)
+- Impact in simple terms (non-technical)
+
+Then show What Can Break (Blast Radius)
+- Bullet list
+- Focus on outcomes, not implementation details
+
+Then show Why This Is Risky (Technical Insight)
+- Keep it short
+- Only 3 to 4 bullets
+- This section is for engineers
+
+Then show Recommended Actions
+- Actionable
+- Clear owner mindset
+- No fluff
+
+End with a Quick Rule / Heuristic
+- One powerful takeaway
+
+STYLE RULES:
+- Use spacing generously
+- Avoid paragraphs longer than 2 lines
+- No repetition
+- No markdown clutter like ### or **
+- Prioritize clarity over completeness
+- Write like a senior engineer explaining to a PM
+
+TONE:
+- Confident
+- Practical
+- No hype
+- No generic AI language
+
+OUTPUT MUST LOOK LIKE A CLEAN DASHBOARD, NOT A WALL OF TEXT."""
+
+
 # ─── Mock responses ───────────────────────────────────────────────────────────
 
 def _mock_blast_radius(result: BlastRadiusResult, change: ChangeRequest) -> str:
     service = result.changed_service_name
-    field = change.field_name or "the endpoint"
-    impacted = ", ".join(s.service_name for s in result.impacted_services[:3])
-    return f"""## What Breaks
-Removing `{field}` from **{service}** will cause immediate failures in {impacted or "downstream services"} — all callers that include this field in their request payload will receive a 422 or 500 error.
+    impacted = result.impacted_services[:3]
+    top_service = impacted[0].service_name if impacted else "checkout flow"
+    outcome = "Orders may stop completing successfully" if result.total_impacted > 0 else "No major downstream customer flow is expected to break"
+    ranked = "\n\n".join(
+        f"{idx}. {svc.service_name}\n"
+        f"Why it is critical: It sits close to the changed path and depends on {service} for key workflow data.\n"
+        f"Impact: Customers or operations teams may see delays, failed transactions, or missing updates."
+        for idx, svc in enumerate(impacted, start=1)
+    ) or "1. No directly exposed critical downstream service\nWhy it is critical: This change currently has limited spread in the loaded graph.\nImpact: Business disruption is likely to stay contained."
+    break_list = "\n".join(
+        f"- {svc.service_name} may stop processing its normal workflow correctly."
+        for svc in impacted
+    ) or "- No immediate downstream outcome is expected to fail."
 
-## Business Impact
-Checkout flow will fail end-to-end: users cannot complete purchases. The payment confirmation email will not be sent, and fraud detection will miss transaction events.
+    return f"""Executive Summary:
+A change in {service} is likely to create visible downstream disruption, with {top_service} most exposed first.
 
-## Migration Path
-1. **Version the endpoint** — introduce `/v2/Charge` with the new schema alongside the old one
-2. **Notify downstream teams** — Checkout (Go), Accounting (.NET) must update their gRPC clients
-3. **Deploy in order** — update consumers first, then deprecate `/v1/Charge` after 2 sprints
-4. **Feature-flag the cutover** — use Flagd to gradually shift traffic
+Risk Dashboard:
+- 🔴 Overall risk: {result.risk_level.title()} because the change touches a shared dependency path.
+- 🔴 Impact scope: {result.total_impacted} downstream service(s) may need attention.
+- 🟡 Business exposure: {outcome}.
+- 🟢 Containment path: A staged rollout and consumer-first update plan can reduce the risk quickly.
 
-## Testing Required
-- `checkout-service`: update `TestPlaceOrder` integration test
-- `fraud-detection`: update Kafka consumer contract test
-- `accounting`: update ledger reconciliation test
-- Run full regression on payment flow E2E suite
+Critical Services (Ranked):
+{ranked}
 
-> ⚠️ *This is a mock response. Set `MOCK_AI=false` and add your `ANTHROPIC_API_KEY` for real Claude analysis.*"""
+What Can Break (Blast Radius):
+{break_list}
+
+Why This Is Risky (Technical Insight):
+- The changed contract sits on a shared path used by multiple dependent services.
+- A breaking field or endpoint change can fail consumers immediately if they are not updated first.
+- The affected services likely need coordinated testing, not isolated service validation.
+- If rollout order is wrong, production issues will spread faster than code fixes.
+
+Recommended Actions:
+- Service owner: version the contract or add a backward-compatible transition path.
+- Consumer teams: update clients and contract tests before the old behavior is removed.
+- Platform or QA owner: run one end-to-end validation across the full user flow.
+- Release owner: use phased rollout or feature flags to limit blast radius during cutover.
+
+Quick Rule / Heuristic:
+If a service sits on a shared transaction path, treat every breaking change as a coordinated release, not a local code change."""
 
 
 def _mock_rca(incident_service: str) -> str:
@@ -184,6 +264,8 @@ def analyze_blast_radius(
     impacted_text = _format_impacted(result)
     prompt = f"""You are an expert platform architect analyzing the impact of a microservice change.
 
+{_blast_radius_dashboard_style()}
+
 {graph_context}
 
 ## Change Details
@@ -198,15 +280,20 @@ def analyze_blast_radius(
 
 ## Overall Risk Level: {result.risk_level.upper()}
 
-Using the full org graph context above, provide a concise analysis:
-1. **What breaks**: Which integrations fail and why (reference specific services from the graph)
-2. **Business impact**: Which user-facing flows are affected (trace the dependency chain)
-3. **Migration path**: Step-by-step fix — considering all teams in the blast radius
-4. **Testing required**: Which test suites must be updated
-
-Format with clear headings. Be specific, actionable, under 300 words."""
+Using the full org graph context above, produce the final answer in the required dashboard format.
+Reference specific impacted services from the graph, but explain business impact in plain English.
+Keep it decision-ready, readable, and under 350 words."""
 
     return _call_claude("analyze_blast_radius", 600, [{"role": "user", "content": prompt}])
+
+
+def analyze_blast_radius_with_graph(
+    result: BlastRadiusResult,
+    change: ChangeRequest,
+    graph,
+) -> str:
+    ctx = format_graph_context(graph.services, graph.edges)
+    return analyze_blast_radius(result, change, graph_context=ctx)
 
 
 def analyze_rca(

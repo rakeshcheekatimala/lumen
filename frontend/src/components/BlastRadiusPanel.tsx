@@ -204,6 +204,19 @@ export default function BlastRadiusPanel({ result, loading, onClose, onShareToCh
                 </span>
               )}
             </div>
+
+            {loading ? (
+              <div className="panel-subtle flex items-center gap-2 rounded-2xl px-4 py-4 text-sm text-slate-400">
+                <Loader2 size={15} className="animate-spin" />
+                Generating AI analysis...
+              </div>
+            ) : result.ai_analysis ? (
+              <div className="panel-subtle rounded-2xl px-4 py-4">
+                <div className="prose-dark max-w-none text-sm">
+                  <ReactMarkdown>{result.ai_analysis}</ReactMarkdown>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
