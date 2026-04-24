@@ -12,9 +12,9 @@ interface Props {
 
 const TABS: { id: ViewMode; label: string; icon: typeof Network }[] = [
   { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'repo-scan', label: 'Repo Scanner', icon: ScanSearch },
   { id: 'srb', label: 'SRB Autopilot', icon: ClipboardCheck },
   { id: 'schema-diff', label: 'Schema Diff', icon: GitCompareArrows },
-  { id: 'repo-scan', label: 'Repo Scanner', icon: ScanSearch },
 ]
 
 export default function Header({ serviceCount, edgeCount, isHealthy, view, onViewChange }: Props) {
