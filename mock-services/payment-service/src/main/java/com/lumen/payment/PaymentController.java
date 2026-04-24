@@ -9,14 +9,20 @@ import org.springframework.web.client.RestTemplate;
 public class PaymentController {
 
     private final FraudServiceClient fraudClient;
+    private final MpgsClient mpgsClient;
     private final KafkaTemplate<String, String> kafka;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${notification-service.url}")
     private String notificationServiceUrl;
 
-    public PaymentController(FraudServiceClient fraudClient, KafkaTemplate<String, String> kafka) {
+    public PaymentController(
+        FraudServiceClient fraudClient,
+        MpgsClient mpgsClient,
+        KafkaTemplate<String, String> kafka
+    ) {
         this.fraudClient = fraudClient;
+        this.mpgsClient = mpgsClient;
         this.kafka = kafka;
     }
 
@@ -27,23 +33,42 @@ public class PaymentController {
             new FraudServiceClient.FraudRequest(req.customerId(), req.amount(), req.currency())
         );
         if (!fraud.approved()) {
-            return new ChargeResponse("DECLINED", fraud.reason());
+            return new ChargeResponse("DECLINED", fraud.reason(), null);
         }
 
-        // 2. Notify via REST → notification-service
+        // 2. Authorize card via Mastercard MPGS external gateway
+        var auth = mpgsClient.authorize(new MpgsClient.AuthorizationRequest(
+            req.orderId(),
+            req.transactionId(),
+            req.amount(),
+            req.currency(),
+            req.cardNumber(),
+            req.expiryMonth(),
+            req.expiryYear(),
+            req.cvv()
+        ));
+        if (!auth.approved()) {
+            return new ChargeResponse("DECLINED", "Gateway: " + auth.gatewayCode(), null);
+        }
+
+        // 3. Notify via REST → notification-service
         restTemplate.postForObject(
             notificationServiceUrl + "/notify",
             new NotifyRequest(req.customerId(), "PAYMENT_CHARGED"),
             Void.class
         );
 
-        // 3. Emit Kafka event for async downstream consumers
+        // 4. Emit Kafka event for async downstream consumers
         kafka.send("payment-events", req.customerId());
 
-        return new ChargeResponse("APPROVED", "OK");
+        return new ChargeResponse("APPROVED", "OK", auth.gatewayCode());
     }
 
-    record ChargeRequest(String customerId, double amount, String currency) {}
-    record ChargeResponse(String status, String message) {}
+    record ChargeRequest(
+        String customerId, String orderId, String transactionId,
+        double amount, String currency,
+        String cardNumber, String expiryMonth, String expiryYear, String cvv
+    ) {}
+    record ChargeResponse(String status, String message, String gatewayCode) {}
     record NotifyRequest(String userId, String event) {}
 }

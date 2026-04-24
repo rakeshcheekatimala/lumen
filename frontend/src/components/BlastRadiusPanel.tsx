@@ -191,19 +191,18 @@ export default function BlastRadiusPanel({ result, loading, onClose, onShareToCh
         )}
 
         {(loading || result.ai_analysis) && (
-          <div>
-            <div className="section-label">AI Narrative</div>
-            <div className="panel-subtle mt-3 rounded-2xl px-4 py-4">
-              {loading ? (
-                <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <Loader2 size={15} className="animate-spin" />
-                  Generating explanation and mitigation guidance.
-                </div>
-              ) : result.ai_analysis ? (
-                <div className="prose-dark text-sm">
-                  <ReactMarkdown>{result.ai_analysis}</ReactMarkdown>
-                </div>
-              ) : null}
+          <div className="mt-2">
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+              AI Analysis
+              {result.ai_mode && (
+                <span className={
+                  result.ai_mode === 'real'
+                    ? 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/25'
+                    : 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25'
+                }>
+                  {result.ai_mode === 'real' ? '● LIVE CLAUDE' : '● MOCK'}
+                </span>
+              )}
             </div>
           </div>
         )}

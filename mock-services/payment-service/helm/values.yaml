@@ -11,8 +11,14 @@ config:
   kafka:
     bootstrapServers: kafka:9092
     topic: payment-events
+  mpgs:
+    url: https://na.api.mastercard.com/gateway/version/65
+    merchantId: ""  # set via sealed secret
 
 env:
   FRAUD_SERVICE_URL: http://fraud-service:8082
   NOTIFICATION_SERVICE_URL: http://notification-service:8083
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  MPGS_API_URL: https://na.api.mastercard.com/gateway/version/65
+  MPGS_MERCHANT_ID: ""  # override via sealed secret
+  MPGS_API_KEY: ""      # override via sealed secret

@@ -45,6 +45,132 @@ _JUNK_HOSTS = frozenset({
 })
 
 
+# ── 3rd-party API catalog ─────────────────────────────────────────────────────
+
+_THIRD_PARTY_APIS: list[dict] = [
+    {
+        "id": "mpgs", "name": "Mastercard MPGS",
+        "category": "payment-gateway",
+        "domains": ["mastercard.com", "na.api.mastercard", "na-gateway.mastercard"],
+        "env_vars": ["MPGS_API_URL", "MPGS_API_KEY", "MPGS_MERCHANT_ID", "MPGS_BASE_URL",
+                     "MASTERCARD_API_URL", "MASTERCARD_API_KEY"],
+    },
+    {
+        "id": "stripe", "name": "Stripe",
+        "category": "payment-gateway",
+        "domains": ["stripe.com"],
+        "env_vars": ["STRIPE_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
+                     "STRIPE_PUBLISHABLE_KEY"],
+    },
+    {
+        "id": "paypal", "name": "PayPal",
+        "category": "payment-gateway",
+        "domains": ["paypal.com", "sandbox.paypal.com"],
+        "env_vars": ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_API_URL"],
+    },
+    {
+        "id": "adyen", "name": "Adyen",
+        "category": "payment-gateway",
+        "domains": ["adyen.com", "checkout.adyen.com"],
+        "env_vars": ["ADYEN_API_KEY", "ADYEN_MERCHANT_ACCOUNT"],
+    },
+    {
+        "id": "braintree", "name": "Braintree",
+        "category": "payment-gateway",
+        "domains": ["braintreegateway.com"],
+        "env_vars": ["BRAINTREE_MERCHANT_ID", "BRAINTREE_PUBLIC_KEY", "BRAINTREE_PRIVATE_KEY"],
+    },
+    {
+        "id": "twilio", "name": "Twilio",
+        "category": "messaging",
+        "domains": ["twilio.com", "api.twilio.com"],
+        "env_vars": ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"],
+    },
+    {
+        "id": "sendgrid", "name": "SendGrid",
+        "category": "email",
+        "domains": ["sendgrid.com", "sendgrid.net"],
+        "env_vars": ["SENDGRID_API_KEY"],
+    },
+    {
+        "id": "mailgun", "name": "Mailgun",
+        "category": "email",
+        "domains": ["mailgun.com", "api.mailgun.net"],
+        "env_vars": ["MAILGUN_API_KEY", "MAILGUN_DOMAIN"],
+    },
+    {
+        "id": "aws-s3", "name": "AWS S3",
+        "category": "cloud-storage",
+        "domains": ["s3.amazonaws.com"],
+        "env_vars": ["AWS_S3_BUCKET", "S3_BUCKET_URL"],
+    },
+    {
+        "id": "aws-sqs", "name": "AWS SQS",
+        "category": "cloud-messaging",
+        "domains": ["sqs.amazonaws.com"],
+        "env_vars": ["SQS_QUEUE_URL"],
+    },
+    {
+        "id": "pagerduty", "name": "PagerDuty",
+        "category": "monitoring",
+        "domains": ["pagerduty.com", "events.pagerduty.com"],
+        "env_vars": ["PAGERDUTY_ROUTING_KEY", "PAGERDUTY_API_KEY"],
+    },
+    {
+        "id": "sentry", "name": "Sentry",
+        "category": "observability",
+        "domains": ["sentry.io"],
+        "env_vars": ["SENTRY_DSN", "SENTRY_AUTH_TOKEN"],
+    },
+    {
+        "id": "datadog", "name": "Datadog",
+        "category": "observability",
+        "domains": ["datadoghq.com", "api.datadoghq.com"],
+        "env_vars": ["DATADOG_API_KEY", "DD_API_KEY"],
+    },
+    {
+        "id": "auth0", "name": "Auth0",
+        "category": "auth",
+        "domains": ["auth0.com"],
+        "env_vars": ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"],
+    },
+    {
+        "id": "okta", "name": "Okta",
+        "category": "auth",
+        "domains": ["okta.com"],
+        "env_vars": ["OKTA_CLIENT_ID", "OKTA_CLIENT_SECRET", "OKTA_ISSUER"],
+    },
+    {
+        "id": "launchdarkly", "name": "LaunchDarkly",
+        "category": "feature-flags",
+        "domains": ["launchdarkly.com"],
+        "env_vars": ["LAUNCHDARKLY_SDK_KEY", "LD_SDK_KEY"],
+    },
+]
+
+_THIRD_PARTY_BY_ID: dict[str, dict] = {api["id"]: api for api in _THIRD_PARTY_APIS}
+
+# Flat env-var → api_id map for O(1) lookup
+_THIRD_PARTY_ENV_MAP: dict[str, str] = {}
+for _api in _THIRD_PARTY_APIS:
+    for _var in _api["env_vars"]:
+        _THIRD_PARTY_ENV_MAP[_var.upper()] = _api["id"]
+
+
+def _match_external_api(host: str) -> dict | None:
+    """Match a hostname to a known 3rd-party API entry."""
+    h = host.lower().rstrip(".")
+    for api in _THIRD_PARTY_APIS:
+        if any(d in h for d in api["domains"]):
+            return api
+    return None
+
+
+def _env_var_to_external(var: str) -> str | None:
+    """Return 3rd-party API id if an env var name implies it."""
+    return _THIRD_PARTY_ENV_MAP.get(var.upper())
+
+
 # ── Patterns ──────────────────────────────────────────────────────────────────
 
 # Literal http(s) URL with a hostname
@@ -373,6 +499,22 @@ class ConfigScanner:
                 resolved.add((target, ref.protocol))
         return list(resolved)
 
+    def resolve_external(self, refs: list[CallRef]) -> list[tuple[str, str]]:
+        """Return (third_party_api_id, protocol) pairs for external API calls."""
+        resolved: set[tuple[str, str]] = set()
+        for ref in refs:
+            if ref.protocol == "kafka":
+                continue
+            if ref.target.upper() == ref.target and "_" in ref.target:
+                ext_id = _env_var_to_external(ref.target)
+                if ext_id:
+                    resolved.add((ext_id, ref.protocol))
+            else:
+                ext_info = _match_external_api(ref.target)
+                if ext_info:
+                    resolved.add((ext_info["id"], ref.protocol))
+        return list(resolved)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -630,6 +772,22 @@ class CallScanner:
                 resolved.add((target, ref.protocol))
         return list(resolved)
 
+    def resolve_external(self, refs: list[CallRef]) -> list[tuple[str, str]]:
+        """Return (third_party_api_id, protocol) pairs for external API calls."""
+        resolved: set[tuple[str, str]] = set()
+        for ref in refs:
+            if ref.protocol == "kafka":
+                continue
+            if ref.target.upper() == ref.target and "_" in ref.target:
+                ext_id = _env_var_to_external(ref.target)
+                if ext_id:
+                    resolved.add((ext_id, ref.protocol))
+            else:
+                ext_info = _match_external_api(ref.target)
+                if ext_info:
+                    resolved.add((ext_info["id"], ref.protocol))
+        return list(resolved)
+
 
 # ── Top-level scanner ─────────────────────────────────────────────────────────
 
@@ -673,6 +831,7 @@ class RepoScanner:
 
         nodes: list[ServiceNode] = []
         edges: list[ServiceEdge] = []
+        external_apis_found: dict[str, dict] = {}  # api_id → catalog entry
 
         for svc in raw:
             nodes.append(ServiceNode(
@@ -699,7 +858,8 @@ class RepoScanner:
             # Signal 2: config files — Helm values, ConfigMaps, .env, app configs
             helm_dir: Path | None = svc.get("helm_dir")
             cfg_root = helm_dir if helm_dir else svc["root"]
-            for target, proto in cfg_scanner.resolve(cfg_scanner.scan_dir(cfg_root)):
+            cfg_refs = cfg_scanner.scan_dir(cfg_root)
+            for target, proto in cfg_scanner.resolve(cfg_refs):
                 key = (svc["id"], target)
                 if target != svc["id"] and key not in seen_edges:
                     edges.append(ServiceEdge(
@@ -711,7 +871,8 @@ class RepoScanner:
                     seen_edges.add(key)
 
             # Signal 3: static source code analysis
-            for target, proto in code_scanner.resolve(code_scanner.scan_dir(svc["root"])):
+            code_refs = code_scanner.scan_dir(svc["root"])
+            for target, proto in code_scanner.resolve(code_refs):
                 key = (svc["id"], target)
                 if target != svc["id"] and key not in seen_edges:
                     edges.append(ServiceEdge(
@@ -720,6 +881,36 @@ class RepoScanner:
                         protocol=proto,
                     ))
                     seen_edges.add(key)
+
+            # Signal 4: 3rd-party external API detection (code + config)
+            for ext_id, proto in (
+                code_scanner.resolve_external(code_refs)
+                + cfg_scanner.resolve_external(cfg_refs)
+            ):
+                api_info = _THIRD_PARTY_BY_ID.get(ext_id)
+                if not api_info:
+                    continue
+                external_apis_found[ext_id] = api_info
+                key = (svc["id"], ext_id)
+                if key not in seen_edges:
+                    edges.append(ServiceEdge(
+                        source=svc["id"],
+                        target=ext_id,
+                        protocol=proto,
+                        label="external",
+                    ))
+                    seen_edges.add(key)
+
+        # Append external API nodes after all internal services
+        for ext_id, api_info in external_apis_found.items():
+            nodes.append(ServiceNode(
+                id=ext_id,
+                name=api_info["name"],
+                language="unknown",
+                team=api_info["category"],
+                description=f"3rd-party {api_info['category']} integration",
+                node_type="external",
+            ))
 
         _compute_risk_scores(nodes, edges)
         return nodes, edges

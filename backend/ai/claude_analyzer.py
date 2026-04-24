@@ -4,9 +4,14 @@ import logging
 import anthropic
 logger = logging.getLogger(__name__)
 
-from graph.models import BlastRadiusResult, RCAResult, ChangeRequest, SRBValidation, SchemaDiffResult
+from graph.models import (
+    BlastRadiusResult, RCAResult, ChangeRequest, SRBValidation, SchemaDiffResult,
+    ServiceNode, ServiceEdge,
+)
 
 MOCK_AI = os.environ.get("MOCK_AI", "false").lower() == "true"
+
+logger = logging.getLogger(__name__)
 
 _client: anthropic.Anthropic | None = None
 
@@ -15,6 +20,36 @@ def _get_client() -> anthropic.Anthropic:
     if _client is None:
         _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     return _client
+
+
+def _call_claude(fn_name: str, max_tokens: int, messages: list[dict]) -> str:
+    """
+    Single call site for all Claude API requests.
+    Logs prompt size, token usage, stop reason, and response preview.
+    """
+    prompt_chars = sum(len(m.get("content", "")) for m in messages)
+    logger.info(
+        "[claude] %s | model=%s | max_tokens=%d | prompt_chars=%d",
+        fn_name, MODEL, max_tokens, prompt_chars,
+    )
+
+    msg = _get_client().messages.create(
+        model=MODEL,
+        max_tokens=max_tokens,
+        messages=messages,
+    )
+
+    text = msg.content[0].text
+    usage = msg.usage
+    logger.info(
+        "[claude] %s | input_tokens=%d | output_tokens=%d | stop=%s | preview=%.120r",
+        fn_name,
+        usage.input_tokens,
+        usage.output_tokens,
+        msg.stop_reason,
+        text,
+    )
+    return text
 
 MODEL = "claude-sonnet-4-6"
 
@@ -91,6 +126,42 @@ def _mock_srb() -> dict:
     }
 
 
+# ─── Org graph knowledge base ─────────────────────────────────────────────────
+
+def format_graph_context(
+    services: list[ServiceNode],
+    edges: list[ServiceEdge],
+    max_services: int = 40,
+    max_edges: int = 60,
+) -> str:
+    """
+    Compact text summary of the live org graph, injected into every AI prompt
+    so Claude reasons about the full topology — not just the specific service.
+    """
+    svcs = services[:max_services]
+    edgs = edges[:max_edges]
+
+    svc_lines = "\n".join(
+        f"  - {s.id} ({s.language}, team:{s.team})"
+        + (f" — {s.description[:70]}" if s.description else "")
+        for s in svcs
+    )
+    edge_lines = "\n".join(
+        f"  - {e.source} →[{e.protocol}]→ {e.target}"
+        + (f" ({e.label})" if e.label else "")
+        for e in edgs
+    )
+    overflow_note = (
+        f"\n  … and {len(services) - max_services} more services"
+        if len(services) > max_services else ""
+    )
+    return (
+        f"## Live Org Graph ({len(services)} services, {len(edges)} edges)\n"
+        f"### Services\n{svc_lines}{overflow_note}\n\n"
+        f"### Dependency Edges\n{edge_lines}"
+    )
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def _format_impacted(result: BlastRadiusResult) -> str:
@@ -101,21 +172,19 @@ def _format_impacted(result: BlastRadiusResult) -> str:
     )
 
 
-def analyze_blast_radius(result: BlastRadiusResult, change: ChangeRequest) -> str:
-    logger.info(f"[ANALYZER] analyze_blast_radius called for {result.changed_service}")
-    logger.info(f"[ANALYZER] MOCK_AI={MOCK_AI}")
-    
+def analyze_blast_radius(
+    result: BlastRadiusResult,
+    change: ChangeRequest,
+    graph_context: str = "",
+) -> str:
     if MOCK_AI:
         logger.info(f"[ANALYZER] Using mock response")
         return _mock_blast_radius(result, change)
 
-    logger.info(f"[ANALYZER] Using real Claude API (model={MODEL})")
-    
-    try:
-        impacted_text = _format_impacted(result)
-        logger.info(f"[ANALYZER] Formatted impacted text: {len(impacted_text)} chars")
-        
-        prompt = f"""You are an expert platform architect at a large e-commerce company analyzing the impact of a microservice change.
+    impacted_text = _format_impacted(result)
+    prompt = f"""You are an expert platform architect analyzing the impact of a microservice change.
+
+{graph_context}
 
 ## Change Details
 - **Service**: {result.changed_service_name}
@@ -124,39 +193,28 @@ def analyze_blast_radius(result: BlastRadiusResult, change: ChangeRequest) -> st
 - **Field Changed**: {change.field_name or "N/A"}
 - **Description**: {change.description or "No description provided"}
 
-## Impacted Services ({result.total_impacted} total)
+## Blast Radius ({result.total_impacted} impacted services)
 {impacted_text if impacted_text else "No downstream services impacted."}
 
 ## Overall Risk Level: {result.risk_level.upper()}
 
-Please provide a concise analysis with:
-1. **What breaks**: Which integrations will fail and why
-2. **Business impact**: What user-facing features are affected
-3. **Migration path**: Step-by-step fix recommendations
+Using the full org graph context above, provide a concise analysis:
+1. **What breaks**: Which integrations fail and why (reference specific services from the graph)
+2. **Business impact**: Which user-facing flows are affected (trace the dependency chain)
+3. **Migration path**: Step-by-step fix — considering all teams in the blast radius
 4. **Testing required**: Which test suites must be updated
 
-Format with clear headings. Be specific, actionable, and concise (under 300 words)."""
+Format with clear headings. Be specific, actionable, under 300 words."""
 
-        logger.info(f"[ANALYZER] Getting client...")
-        client = _get_client()
-        logger.info(f"[ANALYZER] Client obtained, calling Claude...")
-        
-        message = client.messages.create(
-            model=MODEL,
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        
-        response = message.content[0].text
-        logger.info(f"[ANALYZER] ✓ Got Claude response: {len(response)} chars")
-        return response
-        
-    except Exception as e:
-        logger.error(f"[ANALYZER] ✗ Error calling Claude: {e}", exc_info=True)
-        raise
+    return _call_claude("analyze_blast_radius", 600, [{"role": "user", "content": prompt}])
 
 
-def analyze_rca(rca: RCAResult, request_description: str, incident_service: str) -> str:
+def analyze_rca(
+    rca: RCAResult,
+    request_description: str,
+    incident_service: str,
+    graph_context: str = "",
+) -> str:
     if MOCK_AI:
         return _mock_rca(incident_service)
 
@@ -167,6 +225,8 @@ def analyze_rca(rca: RCAResult, request_description: str, incident_service: str)
     )
     prompt = f"""You are an SRE on-call analyzing a production incident.
 
+{graph_context}
+
 ## Incident
 - **Affected Service**: {incident_service}
 - **Description**: {request_description}
@@ -174,23 +234,18 @@ def analyze_rca(rca: RCAResult, request_description: str, incident_service: str)
 ## Upstream Dependencies (potential root causes)
 {candidates or "No upstream dependencies found."}
 
-## Also Impacted (downstream)
+## Also Impacted Downstream
 {len(rca.blast_radius)} additional services affected.
 
-Provide a rapid RCA analysis with:
-1. **Most Likely Root Cause**: Top 2 candidates with reasoning
+Using the full org graph above, provide a rapid RCA:
+1. **Most Likely Root Cause**: Top 2 candidates with reasoning (reference the dependency chain)
 2. **Immediate Actions**: What to check in the next 5 minutes
-3. **Runbook**: Step-by-step investigation order
+3. **Runbook**: Step-by-step investigation order (consider all dependent services)
 4. **Prevention**: How to prevent this class of incident
 
 Be direct and actionable. Under 250 words."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=500,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    return _call_claude("analyze_rca", 500, [{"role": "user", "content": prompt}])
 
 
 # ─── SRB narrative rationale ──────────────────────────────────────────────────
@@ -219,7 +274,7 @@ This proposal integrates with {len(s.upstream_callers)} upstream caller(s) and {
 > ⚠️ *Mock response — set `MOCK_AI=false` + `ANTHROPIC_API_KEY` for real Claude analysis.*"""
 
 
-def analyze_srb(v: SRBValidation) -> str:
+def analyze_srb(v: SRBValidation, graph_context: str = "") -> str:
     if MOCK_AI:
         return _mock_srb_rationale(v)
 
@@ -235,6 +290,8 @@ def analyze_srb(v: SRBValidation) -> str:
     down = ", ".join(f"{i.service_id} ({i.protocol})" for i in s.downstream_dependencies) or "none"
 
     prompt = f"""You are a principal architect reviewing a System Review Board (SRB) submission.
+
+{graph_context}
 
 ## Proposal
 - **Service**: {s.service_name}
@@ -258,19 +315,14 @@ def analyze_srb(v: SRBValidation) -> str:
 
 ## Computed Risk: {v.risk_score}/10 — Recommendation: {v.recommendation}
 
-Write a concise architect's rationale (under 250 words) covering:
-1. **Overall assessment** — viability and main concerns
-2. **Blast radius implications** — what the graph tells us about future impact
+Using the full org graph context above, write a concise architect's rationale (under 250 words):
+1. **Overall assessment** — viability and main concerns given the existing topology
+2. **Blast radius implications** — which existing services/teams are affected
 3. **Recommendation rationale** — why APPROVE/CONDITIONAL/REJECT
 
 Format with clear markdown headings. Be direct and specific."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    return _call_claude("analyze_srb", 600, [{"role": "user", "content": prompt}])
 
 
 # ─── Schema diff narrative ────────────────────────────────────────────────────
@@ -294,7 +346,7 @@ def _mock_schema_diff_narrative(result: SchemaDiffResult) -> str:
 > ⚠️ *Mock response — set `MOCK_AI=false` for real Claude analysis.*"""
 
 
-def analyze_schema_diff(result: SchemaDiffResult) -> str:
+def analyze_schema_diff(result: SchemaDiffResult, graph_context: str = "") -> str:
     if MOCK_AI:
         return _mock_schema_diff_narrative(result)
 
@@ -303,7 +355,16 @@ def analyze_schema_diff(result: SchemaDiffResult) -> str:
         for c in result.changes
     ) or "No changes detected."
 
+    service_note = (
+        f"This schema belongs to **{result.service_id}** in the org graph."
+        if result.service_id else ""
+    )
+
     prompt = f"""You are an API contract reviewer.
+
+{graph_context}
+
+{service_note}
 
 ## Schema Diff
 {result.breaking_count} breaking / {result.total_count} total changes.
@@ -311,30 +372,27 @@ def analyze_schema_diff(result: SchemaDiffResult) -> str:
 ### Changes
 {changes_text}
 
-Provide migration guidance (under 200 words):
+Using the org graph above, provide migration guidance (under 200 words):
 1. **Severity summary** — is this safe to deploy?
-2. **Consumer impact** — which callers must update and how
+2. **Consumer impact** — which callers (from the graph) must update and how
 3. **Rollout plan** — versioning, feature flags, deprecation timeline
 
 Be concise and actionable."""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    return _call_claude("analyze_schema_diff", 400, [{"role": "user", "content": prompt}])
 
 
 # ─── Legacy free-text SRB (kept for old endpoint) ─────────────────────────────
 
-def validate_srb_design(services_summary: str, proposed_change: str) -> dict:
+def validate_srb_design(services_summary: str, proposed_change: str, graph_context: str = "") -> dict:
     if MOCK_AI:
         return _mock_srb()
 
     prompt = f"""You are a senior architect reviewing a System Review Board (SRB) submission.
 
-## Current Architecture
+{graph_context}
+
+## Affected Services Summary
 {services_summary}
 
 ## Proposed Change
@@ -357,13 +415,8 @@ Respond in JSON format:
   "summary": "one paragraph summary"
 }}"""
 
-    message = _get_client().messages.create(
-        model=MODEL,
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    )
     import json
-    text = message.content[0].text
+    text = _call_claude("validate_srb_design", 800, [{"role": "user", "content": prompt}])
     try:
         start = text.find("{")
         end = text.rfind("}") + 1

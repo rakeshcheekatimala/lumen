@@ -115,13 +115,13 @@ def _mock_result(repo_name: str) -> dict:
     }
 
 
-def analyze_repo(repo_path: str) -> dict:
+def analyze_repo(repo_path: str, org_context: str = "") -> dict:
     """
     Feed key repository files to Claude and extract the microservice topology.
 
     Returns:
         {
-          "services": [{"id", "name", "language", "team", "description"}, ...],
+          "services": [{"id", "name", "language", "team", "description", "node_type"}, ...],
           "edges":    [{"source", "target", "protocol", "label"}, ...],
           "summary":  "architecture summary string"
         }
@@ -140,7 +140,9 @@ def analyze_repo(repo_path: str) -> dict:
         for f in files
     )
 
-    prompt = f"""You are an expert software architect analyzing a microservices repository.
+    org_section = f"\n{org_context}\n" if org_context else ""
+
+    prompt = f"""You are an expert software architect analyzing a microservices repository.{org_section}
 
 Analyze the source files below and extract the complete microservice topology.
 
@@ -154,7 +156,7 @@ Identify:
 1. Every distinct microservice / application
 2. Every dependency edge (which service calls / consumes which)
 
-Evidence to look for:
+Evidence to look for (internal services):
 - docker-compose service definitions and `depends_on`
 - HTTP client calls (requests, axios, fetch, RestTemplate, http.Get)
 - gRPC dial / channel creation
@@ -162,6 +164,12 @@ Evidence to look for:
 - @FeignClient annotations
 - Environment variables referencing other services (PAYMENT_SERVICE_URL, etc.)
 - Import of internal client packages (e.g. `import paymentclient`)
+
+Evidence to look for (3rd-party external APIs):
+- Calls to external domains: stripe.com, mastercard.com, paypal.com, adyen.com, twilio.com, sendgrid.com, auth0.com, okta.com, sentry.io, datadog.com, etc.
+- API key env vars: STRIPE_API_KEY, MPGS_API_KEY, MPGS_API_URL, TWILIO_ACCOUNT_SID, SENDGRID_API_KEY, SENTRY_DSN, etc.
+- SDK imports: `import stripe`, `from twilio.rest import Client`, `@FeignClient("mpgs")`, etc.
+- Config values pointing to external base URLs
 
 ## Output Format
 Respond ONLY with valid JSON. No prose before or after.
@@ -173,7 +181,16 @@ Respond ONLY with valid JSON. No prose before or after.
       "name": "Human Readable Name",
       "language": "Go|Python|TypeScript|Java|Rust|...",
       "team": "team-name or unknown",
-      "description": "one sentence about what this service does"
+      "description": "one sentence about what this service does",
+      "node_type": "internal"
+    }},
+    {{
+      "id": "stripe",
+      "name": "Stripe",
+      "language": "unknown",
+      "team": "payment-gateway",
+      "description": "3rd-party payment gateway integration",
+      "node_type": "external"
     }}
   ],
   "edges": [
@@ -181,7 +198,7 @@ Respond ONLY with valid JSON. No prose before or after.
       "source": "caller-service-id",
       "target": "callee-service-id",
       "protocol": "http|grpc|kafka|amqp|unknown",
-      "label": "optional context"
+      "label": "optional context — use 'external' for 3rd-party edges"
     }}
   ],
   "summary": "1-2 sentence architecture summary"
@@ -191,7 +208,9 @@ Rules:
 - Only include services with clear evidence in the files
 - Only include edges with concrete call/dependency evidence
 - All service ids must be lowercase and hyphen-separated
-- Omit uncertain edges rather than guessing"""
+- Omit uncertain edges rather than guessing
+- For 3rd-party APIs (Stripe, MPGS, Twilio, etc.) use node_type "external", team = category (payment-gateway, messaging, etc.)
+- Include the edge from internal service → external API"""
 
     msg = _get_client().messages.create(
         model=MODEL,
@@ -222,6 +241,7 @@ def to_graph_models(ai_result: dict) -> tuple[list[ServiceNode], list[ServiceEdg
             language=s.get("language", "unknown"),
             team=s.get("team", "unknown"),
             description=s.get("description", ""),
+            node_type=s.get("node_type", "internal"),
         ))
 
     edges = []

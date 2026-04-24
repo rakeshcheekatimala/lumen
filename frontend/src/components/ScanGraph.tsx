@@ -61,25 +61,33 @@ interface Props {
 export default function ScanGraph({ services, edges, title }: Props) {
   const rawNodes: Node[] = useMemo(
     () =>
-      services.map((svc) => ({
-        id: svc.id,
-        type: 'default',
-        position: { x: 0, y: 0 },
-        data: { label: svc.name },
-        style: {
-          background: '#0d1526',
-          border: `1px solid ${LANG_COLORS[svc.language] ?? '#1e2d45'}40`,
-          borderRadius: '8px',
-          color: '#e2e8f0',
-          fontSize: '11px',
-          padding: '6px 10px',
-          width: NODE_W,
-          minHeight: NODE_H,
-          display: 'flex',
-          flexDirection: 'column' as const,
-          gap: '2px',
-        },
-      })),
+      services.map((svc) => {
+        const isExternal = svc.node_type === 'external'
+        const borderColor = isExternal
+          ? '#f97316'
+          : (LANG_COLORS[svc.language] ?? '#1e2d45')
+        return {
+          id: svc.id,
+          type: 'default',
+          position: { x: 0, y: 0 },
+          data: {
+            label: isExternal ? `${svc.name} ↗` : svc.name,
+          },
+          style: {
+            background: isExternal ? '#1a0f06' : '#0d1526',
+            border: `1px solid ${borderColor}${isExternal ? '' : '40'}`,
+            borderRadius: '8px',
+            color: isExternal ? '#fdba74' : '#e2e8f0',
+            fontSize: '11px',
+            padding: '6px 10px',
+            width: NODE_W,
+            minHeight: NODE_H,
+            display: 'flex',
+            flexDirection: 'column' as const,
+            gap: '2px',
+          },
+        }
+      }),
     [services],
   )
 
@@ -88,29 +96,33 @@ export default function ScanGraph({ services, edges, title }: Props) {
       edges.map((e, i) => {
         const color = PROTOCOL_COLORS[e.protocol] ?? '#475569'
         const isCrossRepo = e.label === 'cross-repo'
+        const isExternal = e.label === 'external'
+        const edgeColor = isCrossRepo ? '#f59e0b' : isExternal ? '#f97316' : color
         return {
           id: `sg-${i}-${e.source}-${e.target}`,
           source: e.source,
           target: e.target,
-          animated: isCrossRepo,
+          animated: isCrossRepo || isExternal,
           style: {
-            stroke: isCrossRepo ? '#f59e0b' : color,
-            strokeWidth: isCrossRepo ? 2 : 1.5,
-            strokeDasharray: isCrossRepo ? '6 3' : undefined,
+            stroke: edgeColor,
+            strokeWidth: isExternal ? 2 : isCrossRepo ? 2 : 1.5,
+            strokeDasharray: isCrossRepo ? '6 3' : isExternal ? '4 2' : undefined,
             opacity: 0.8,
           },
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: isCrossRepo ? '#f59e0b' : color,
+            color: edgeColor,
             width: 10,
             height: 10,
           },
-          label: e.label === 'cross-repo'
+          label: isCrossRepo
             ? '↔ cross-repo'
-            : e.protocol !== 'http'
-              ? e.protocol
-              : undefined,
-          labelStyle: { fill: '#64748b', fontSize: 9 },
+            : isExternal
+              ? '↗ ext'
+              : e.protocol !== 'http'
+                ? e.protocol
+                : undefined,
+          labelStyle: { fill: isExternal ? '#f97316' : '#64748b', fontSize: 9 },
           labelBgStyle: { fill: '#0d1526', opacity: 0.8 },
         }
       }),
