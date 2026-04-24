@@ -1,13 +1,13 @@
-import { X, Globe, Users, Server, Shield } from 'lucide-react'
+import { Globe, Shield, Server, Users, X } from 'lucide-react'
 import clsx from 'clsx'
 import type { ServiceNode } from '../types'
 
 const METHOD_COLORS: Record<string, string> = {
-  GET: 'bg-green-500/20 text-green-300 border-green-500/30',
-  POST: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-  PUT: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
-  DELETE: 'bg-red-500/20 text-red-300 border-red-500/30',
-  PATCH: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  GET: 'bg-emerald-400/12 text-emerald-100 border-emerald-400/18',
+  POST: 'bg-sky-400/12 text-sky-100 border-sky-400/18',
+  PUT: 'bg-amber-400/12 text-amber-100 border-amber-400/18',
+  DELETE: 'bg-rose-500/12 text-rose-100 border-rose-500/18',
+  PATCH: 'bg-slate-300/10 text-slate-100 border-white/10',
 }
 
 interface Props {
@@ -19,101 +19,126 @@ export default function ServiceDetail({ service, onClose }: Props) {
   const riskPercent = Math.round(service.risk_score * 100)
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1526] border-l border-[#1e2d45] overflow-hidden">
-      <div className="p-4 border-b border-[#1e2d45]">
-        <div className="flex items-start justify-between mb-3">
+    <section className="panel-surface flex h-full min-h-[420px] flex-col overflow-hidden rounded-[28px]">
+      <div className="border-b soft-divider px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-bold text-slate-100">{service.name}</h2>
-            <p className="text-xs text-slate-500 mt-0.5">{service.description}</p>
+            <div className="section-label">Service Detail</div>
+            <h2 className="mt-2 text-lg font-semibold text-slate-50">{service.name}</h2>
+            <p className="mt-1 text-sm text-slate-400">{service.description || 'No additional service description available.'}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-500 hover:text-slate-300 p-1 -mt-1 -mr-1"
-          >
-            <X size={16} />
+          <button onClick={onClose} className="icon-button rounded-xl p-2" title="Close panel">
+            <X size={15} />
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="flex items-center gap-1.5 text-xs text-slate-400">
-            <Globe size={12} className="text-slate-500" />
-            <span className="mono">{service.language}</span>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="panel-subtle rounded-2xl px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
+              <Globe size={15} className="text-slate-500" />
+              <span>{service.language}</span>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">Primary implementation language</div>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-400">
-            <Users size={12} className="text-slate-500" />
-            <span>{service.team}</span>
+
+          <div className="panel-subtle rounded-2xl px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
+              <Users size={15} className="text-slate-500" />
+              <span>{service.team}</span>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">Owning team</div>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-400">
-            <Server size={12} className="text-slate-500" />
-            <span className="mono">:{service.port}</span>
+
+          <div className="panel-subtle rounded-2xl px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
+              <Server size={15} className="text-slate-500" />
+              <span className="mono">:{service.port}</span>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">Primary service port</div>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-400">
-            <Shield size={12} className="text-slate-500" />
-            <div className="flex items-center gap-1">
-              <div className="h-1.5 w-16 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className={clsx(
-                    'h-full rounded-full transition-all',
-                    riskPercent >= 70 ? 'bg-red-500' : riskPercent >= 40 ? 'bg-orange-500' : 'bg-green-500',
-                  )}
-                  style={{ width: `${riskPercent}%` }}
-                />
-              </div>
-              <span>{riskPercent}%</span>
+
+          <div className="panel-subtle rounded-2xl px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
+              <Shield size={15} className="text-slate-500" />
+              <span>{riskPercent}% risk exposure</span>
+            </div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800/90">
+              <div
+                className={clsx(
+                  'h-full rounded-full',
+                  riskPercent >= 70
+                    ? 'bg-rose-400'
+                    : riskPercent >= 40
+                      ? 'bg-amber-300'
+                      : 'bg-emerald-400',
+                )}
+                style={{ width: `${riskPercent}%` }}
+              />
             </div>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-3">
-          Endpoints ({service.endpoints.length})
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="section-label">Endpoints</div>
+          <div className="glass-badge rounded-xl px-3 py-2 text-xs">
+            {service.endpoints.length} exposed interfaces
+          </div>
         </div>
 
         {service.endpoints.length === 0 ? (
-          <p className="text-xs text-slate-600 italic">No endpoints exposed (event-driven)</p>
+          <div className="panel-subtle mt-4 rounded-2xl px-4 py-4 text-sm text-slate-400">
+            No endpoints are currently modeled for this service.
+          </div>
         ) : (
-          <div className="space-y-3">
-            {service.endpoints.map((ep) => (
-              <div key={ep.id} className="bg-[#111827] rounded-lg border border-[#1e2d45] p-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className={clsx(
-                    'text-[10px] font-mono px-1.5 py-0.5 rounded border font-bold',
-                    METHOD_COLORS[ep.method] || 'bg-slate-500/20 text-slate-300',
-                  )}>
-                    {ep.method}
+          <div className="mt-4 space-y-3">
+            {service.endpoints.map((endpoint) => (
+              <div key={endpoint.id} className="panel-subtle rounded-2xl px-4 py-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={clsx('rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]', METHOD_COLORS[endpoint.method] || 'bg-white/[0.05] text-slate-100 border-white/10')}>
+                    {endpoint.method}
                   </span>
-                  <span className="text-xs mono text-slate-300">{ep.path}</span>
+                  <span className="mono text-sm text-slate-200">{endpoint.path}</span>
                 </div>
-                {ep.description && (
-                  <p className="text-[11px] text-slate-500 mb-2">{ep.description}</p>
+
+                {endpoint.description && (
+                  <p className="mt-2 text-sm text-slate-400">{endpoint.description}</p>
                 )}
 
-                {ep.request_fields.length > 0 && (
-                  <div className="mb-2">
-                    <div className="text-[10px] text-slate-600 mb-1">Request</div>
-                    <div className="space-y-1">
-                      {ep.request_fields.map((f) => (
-                        <div key={f.name} className="flex items-center gap-1.5 text-[11px]">
-                          <span className={clsx('mono', f.required ? 'text-slate-300' : 'text-slate-500')}>
-                            {f.name}
+                {endpoint.request_fields.length > 0 && (
+                  <div className="mt-4">
+                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">Request fields</div>
+                    <div className="mt-2 space-y-2">
+                      {endpoint.request_fields.map((field) => (
+                        <div key={field.name} className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-950/24 px-3 py-2 text-xs">
+                          <span className={clsx('mono', field.required ? 'text-slate-100' : 'text-slate-400')}>
+                            {field.name}
                           </span>
-                          <span className="text-slate-600 mono">{f.type}</span>
-                          {f.required && <span className="text-red-400 text-[10px]">*</span>}
+                          <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[10px] text-slate-500">
+                            {field.type}
+                          </span>
+                          {field.required && (
+                            <span className="rounded-full bg-rose-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-200">
+                              Required
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {ep.response_fields.length > 0 && (
-                  <div>
-                    <div className="text-[10px] text-slate-600 mb-1">Response</div>
-                    <div className="space-y-1">
-                      {ep.response_fields.map((f) => (
-                        <div key={f.name} className="flex items-center gap-1.5 text-[11px]">
-                          <span className="mono text-slate-400">{f.name}</span>
-                          <span className="text-slate-600 mono">{f.type}</span>
+                {endpoint.response_fields.length > 0 && (
+                  <div className="mt-4">
+                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">Response fields</div>
+                    <div className="mt-2 space-y-2">
+                      {endpoint.response_fields.map((field) => (
+                        <div key={field.name} className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-950/24 px-3 py-2 text-xs">
+                          <span className="mono text-slate-200">{field.name}</span>
+                          <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[10px] text-slate-500">
+                            {field.type}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -124,6 +149,6 @@ export default function ServiceDetail({ service, onClose }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </section>
   )
 }

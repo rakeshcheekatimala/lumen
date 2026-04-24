@@ -64,3 +64,6 @@ export const ingestMultipleRepos = (
   api
     .post('/ingest/repos', { repo_paths, strategy, reset_graph }, { timeout: 240_000 })
     .then((r) => r.data)
+
+export const fetchChatMessages = () =>
+  api.get('/chat/messages').then((r) => r.data)

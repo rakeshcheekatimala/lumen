@@ -2,6 +2,8 @@
 import os
 import logging
 import anthropic
+logger = logging.getLogger(__name__)
+
 from graph.models import (
     BlastRadiusResult, RCAResult, ChangeRequest, SRBValidation, SchemaDiffResult,
     ServiceNode, ServiceEdge,
@@ -176,6 +178,7 @@ def analyze_blast_radius(
     graph_context: str = "",
 ) -> str:
     if MOCK_AI:
+        logger.info(f"[ANALYZER] Using mock response")
         return _mock_blast_radius(result, change)
 
     impacted_text = _format_impacted(result)

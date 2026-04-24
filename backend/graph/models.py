@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from enum import Enum
 
 
 class FieldModel(BaseModel):
@@ -197,3 +198,21 @@ class MultiRepoIngestResponse(BaseModel):
     per_repo: list[RepoScanResult]
     cross_repo_edges: list[ServiceEdge] = []
     message: str
+
+
+# ─── Chat ─────────────────────────────────────────────────────────────────────
+
+class ChatMessageType(str, Enum):
+    text = "text"
+    blast_radius = "blast_radius"
+    system = "system"
+
+
+class ChatMessage(BaseModel):
+    id: str
+    username: str
+    user_id: str
+    type: ChatMessageType
+    content: str
+    blast_radius: Optional[BlastRadiusResult] = None
+    timestamp: str
