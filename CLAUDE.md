@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project: ArchIntel
+## Project: Lumen AI
 
 AI-Powered Architectural Intelligence Platform. A FastAPI + React app that models a microservices topology (seeded with the OpenTelemetry demo services) and uses Claude (Anthropic API) to reason about change impact. Built as a hackathon demo.
 
