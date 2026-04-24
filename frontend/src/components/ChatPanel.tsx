@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
+import ReactMarkdown from 'react-markdown'
 import { Loader2, Send, X } from 'lucide-react'
 import type { BlastRadiusResult, ChatMessage } from '../types'
 
@@ -52,17 +53,23 @@ function ChatMessageItem({ message, currentUser }: ChatMessageItemProps) {
     <div className={clsx('mb-3 flex', isCurrentUser && 'justify-end')}>
       <div
         className={clsx(
-          'max-w-[85%] rounded-2xl px-3 py-3 text-sm leading-relaxed shadow-[0_10px_24px_rgba(4,10,19,0.14)]',
+          'rounded-2xl px-3 py-3 text-sm leading-relaxed shadow-[0_10px_24px_rgba(4,10,19,0.14)]',
           isSystem
-            ? 'border border-cyan-400/16 bg-cyan-400/[0.08] text-cyan-50'
+            ? 'max-w-[94%] border border-cyan-400/16 bg-cyan-400/[0.08] text-cyan-50'
             : isCurrentUser
-              ? 'bg-[linear-gradient(135deg,rgba(93,214,206,0.24),rgba(95,143,255,0.2))] text-slate-50'
-              : 'panel-subtle text-slate-200',
+              ? 'max-w-[85%] bg-[linear-gradient(135deg,rgba(93,214,206,0.24),rgba(95,143,255,0.2))] text-slate-50'
+              : 'max-w-[85%] panel-subtle text-slate-200',
         )}
       >
         {!isSystem && <div className="mb-1 text-[11px] text-slate-500">{message.username}</div>}
         {isSystem && <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-100">Lumen AI</div>}
-        {message.content}
+        {isSystem ? (
+          <div className="prose-dark max-w-none text-[13px] leading-6">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+          </div>
+        ) : (
+          message.content
+        )}
       </div>
     </div>
   )
