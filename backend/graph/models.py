@@ -27,6 +27,7 @@ class ServiceNode(BaseModel):
     port: int = 8080
     endpoints: list[EndpointModel] = []
     risk_score: float = 0.0  # 0-1
+    node_type: str = "internal"  # "internal" | "external"
 
 
 class ServiceEdge(BaseModel):

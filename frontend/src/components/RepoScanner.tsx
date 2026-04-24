@@ -444,6 +444,8 @@ export default function RepoScanner() {
             'AMQP: channel.queue_declare',
             'Helm: Chart.yaml / values.yaml',
             'ConfigMap: env var URLs',
+            '3rd-party: Stripe / MPGS / PayPal',
+            '3rd-party: Twilio / SendGrid / Auth0',
           ].map((s) => (
             <div key={s} className="flex items-center gap-1.5 text-[11px] text-slate-500">
               <div className="w-1 h-1 rounded-full bg-violet-500 shrink-0" />

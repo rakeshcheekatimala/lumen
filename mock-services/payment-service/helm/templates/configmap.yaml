@@ -7,3 +7,5 @@ data:
   NOTIFICATION_SERVICE_URL: "http://notification-service:8083"
   KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   KAFKA_TOPIC: "payment-events"
+  # Mastercard Payment Gateway Service (MPGS) — external 3rd-party integration
+  MPGS_API_URL: "https://na.api.mastercard.com/gateway/version/65"

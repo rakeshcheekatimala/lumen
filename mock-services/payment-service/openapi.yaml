@@ -24,6 +24,11 @@ x-dependencies:
     url: kafka:9092
     protocol: kafka
     topic: payment-events
+  - service: mpgs
+    url: https://na.api.mastercard.com/gateway/version/65
+    protocol: http
+    type: external
+    note: Mastercard Payment Gateway Service — card authorization
 
 paths:
   /health:

@@ -23,6 +23,7 @@ export interface ServiceNode {
   port: number
   endpoints: EndpointModel[]
   risk_score: number
+  node_type?: string  // "internal" | "external"
 }
 
 export interface ServiceEdge {
